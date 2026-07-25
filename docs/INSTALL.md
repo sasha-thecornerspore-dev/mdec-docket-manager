@@ -13,7 +13,7 @@ use; it cannot grant access you don't have.
 ## Core install
 
 ```bash
-git clone https://github.com/<you>/mdec-docket-manager.git
+git clone https://github.com/sasha-thecornerspore-dev/mdec-docket-manager.git
 cd mdec-docket-manager
 python -m pip install -r requirements.txt
 python -m playwright install chromium

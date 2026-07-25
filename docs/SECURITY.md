@@ -75,9 +75,10 @@ repo under `%APPDATA%`, so a `git add -A` cannot pick up case documents.
 
 Before pushing, sanity-check with `git status`.
 
-If you fork this publicly, remember the repository name and commit messages are
-public even when the code is generic. Consider keeping your fork private — the
-default recommendation in this project.
+The published code is generic — it carries no case number, caption, party, or
+folder path. Your case lives entirely in `%APPDATA%` and your document folder,
+neither of which is in the repository. If you fork it, keep it that way: put
+nothing case-specific in code, commit messages, issues, or branch names.
 
 ## Documents on disk
 

@@ -144,9 +144,9 @@ for the parser; live-portal behavior is documented as a manual walkthrough.
 
 - Server binds 127.0.0.1 only. Secrets only in Windows Credential Manager;
   config.json and the DB contain no secrets; `.gitignore` excludes all runtime data.
-- Repo contains no case-specific data. Pushed to GitHub as a **private** repo
-  (user can flip visibility; chosen private because the project is tied to a
-  personal legal matter).
+- Repo contains no case-specific data. Published **public** — the app is generic
+  (any MDEC case, any number of them), and all case state lives in `%APPDATA%`
+  and the user's document folder, neither of which is in the repository.
 
 ## Out of scope (YAGNI)
 
@@ -157,6 +157,23 @@ cases the user has no access to, mobile app, auto-update.
 
 1. Local web GUI (browser tab / optional pywebview window) instead of a native
    desktop toolkit.
-2. Private GitHub repo.
-3. Default check schedule 2×/day (deliberately polite to the portal).
-4. Default analysis model `claude-sonnet-5`.
+2. Default check schedule 2×/day (deliberately polite to the portal).
+3. Default analysis model `claude-opus-5`.
+
+## Added after the first version (same session, at the user's request)
+
+- **Multiple cases.** Cases moved from config into the `cases` table, each with
+  its own document folder and a monitored flag. Config keeps only the active case
+  number and the folder root for new cases. A pre-multi-case config migrates
+  itself on first load.
+- **Adopt files already on disk** (`pipeline/adopt.py`). Checks adopt
+  catalog-named files before downloading, and the download work list is computed
+  from `entries_missing_documents()` rather than assumed to be the new entries.
+  Makes interrupted harvests resumable and archive imports free. `doc_status`
+  tracks `pending`/`ok`/`view_only`/`error` so view-only entries aren't retried
+  forever.
+- **Native folder picker** via a server-side tkinter dialog, since server and
+  browser share the machine.
+- **Depersonalized** for public release: placeholder case numbers throughout.
+- **Two analysis backends**: Anthropic API key *or* the user's Claude
+  subscription through the Claude Code CLI in print mode.
