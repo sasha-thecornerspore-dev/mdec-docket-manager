@@ -7,6 +7,10 @@ Playwright browser, persisting to SQLite. One process, one user, localhost only,
 no build step.
 
 ```
+Desktop icon ──► pythonw.exe "MDEC Docket Manager.pyw" ──► mdec/desktop.py
+                                                              │
+                        already running? ──► open app window, exit
+                        otherwise ────────► become the service ↓
 run.py ──► uvicorn on 127.0.0.1:8674 ──► mdec/server/app.py (API + static UI)
                                              │
         ┌────────────────────────────────────┼───────────────────────────────┐
@@ -210,6 +214,39 @@ FastAPI. `/api/*` first, static UI mounted at `/` last. Settings PATCH-merge so
 the UI can send a subtree. `POST /api/secrets` is write-only — an empty value
 deletes the slot — and no endpoint returns a secret value.
 
+### `desktop.py` + `serve.py`
+How the app launches, and why it's shaped this way.
+
+`serve.py` runs uvicorn and records the port it actually bound in
+`%APPDATA%\MDECDocketManager\runtime.json`. `desktop.py` is the icon's entry
+point: if a service is already answering (per that file, or the configured port)
+it opens a window and exits; otherwise it picks a free port and **becomes** the
+service in-process.
+
+Three decisions worth keeping:
+
+**The window is Edge/Chrome in `--app=` mode**, not a GUI toolkit. It's
+chromeless with its own taskbar button and favicon, and needs no extra
+dependency — pywebview would be one more install to fail on a machine that just
+wants to read its docket.
+
+**The launcher hosts the service rather than spawning one.** Two Python
+interpreters cost two cold starts; hosting it cut launch from ~19 s to ~3 s.
+`spawn_server()` survives for `run.py --app`, where the caller wants its console
+back.
+
+**Readiness is probed with `/api/ping`, not `/api/status`.** Status does feature
+detection — importing keyring, probing PATH for `ocrmypdf`/`tesseract`/`claude` —
+which took ~4 s on a cold process and used to delay the window by that much.
+Detection now lives in `/api/features`, which the UI fetches *after* first paint,
+and `ocr.available()` uses `importlib.util.find_spec` instead of importing
+ocrmypdf (seconds, via pikepdf and PIL). Both are `lru_cache`d.
+
+One Windows trap encoded here: under `pythonw.exe` there are no standard
+streams — `sys.stdout` is `None` — so `print()` and uvicorn's log handler raise
+`AttributeError` and the app dies invisibly. The `.pyw` entry point redirects the
+streams to the null device before importing anything that logs.
+
 ### `server/static/`
 `index.html` + `app.css` + `app.js`, no framework, no build. The visual idea is a
 clerk's docket ledger as a precise instrument: a left sequence spine where new
@@ -250,7 +287,9 @@ A scheduled sweep runs the above once per monitored case, sequentially.
 
 | Method | Path | Purpose |
 |---|---|---|
-| GET | `/api/status` | Active case, case list, folder, counts, monitor state, feature readiness, recent runs |
+| GET | `/api/ping` | Liveness only — what the launcher polls. Touches nothing. |
+| GET | `/api/status` | Active case, case list, folder, counts, monitor state, recent runs |
+| GET | `/api/features` | OCR / analysis / RAG readiness (slow, cached, fetched after first paint) |
 | GET/POST | `/api/cases` | List / add a case |
 | PUT/DELETE | `/api/cases/{id}` | Update / stop tracking (files on disk untouched) |
 | POST | `/api/cases/{id}/activate` | Switch the active case |
@@ -272,7 +311,9 @@ A scheduled sweep runs the above once per monitored case, sequentially.
 | POST | `/api/actions/analyze-entry/{id}` | Analyze one entry |
 | POST | `/api/actions/analyze-case` | Case briefing |
 | POST | `/api/actions/repair-rename` | Legacy folder rename (`dry_run` flag) |
-| POST | `/api/actions/close-browser` | Close the browser |
+| POST | `/api/actions/close-browser` | Close the portal browser |
+| POST | `/api/actions/quit` | Stop the service (refuses mid-check) |
+| GET | `/favicon.ico` | App icon, also the app window's taskbar icon |
 
 ## Testing
 

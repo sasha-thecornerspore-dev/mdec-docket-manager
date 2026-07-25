@@ -17,6 +17,7 @@ UI + docs all say so.
 from __future__ import annotations
 
 import asyncio
+import functools
 import json
 import re
 import shutil
@@ -67,11 +68,17 @@ class AnalyzerNotConfigured(Exception):
     """No usable Claude backend. The message explains exactly what to set up."""
 
 
+@functools.lru_cache(maxsize=1)
+def _claude_cli() -> str | None:
+    """Cached PATH lookup — the UI polls status, and `which` walks PATH."""
+    return shutil.which("claude")
+
+
 def resolve_backend(cfg: dict) -> tuple[str, str]:
     """Return ('api', key) or ('cli', path-to-claude). Raises with a clear fix."""
     pref = cfg["analysis"].get("backend", "auto")
     api_key = config.get_secret("anthropic_api_key")
-    cli = shutil.which("claude")
+    cli = _claude_cli()
     if pref == "api":
         if api_key:
             return "api", api_key

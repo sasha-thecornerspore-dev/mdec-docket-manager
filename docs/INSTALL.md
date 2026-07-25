@@ -2,39 +2,86 @@
 
 ## Prerequisites
 
-**Python 3.11 or newer.** Check with `python --version`. If Windows opens the
-Microsoft Store instead, install from [python.org](https://www.python.org/downloads/)
-and tick "Add python.exe to PATH".
+**Python 3.11 or newer** — the only thing you install yourself. Check with
+`python --version`. If Windows opens the Microsoft Store instead, install from
+[python.org](https://www.python.org/downloads/) and tick **"Add python.exe to
+PATH"**; without that the installer can't find it.
+
+**Edge or Chrome**, for the app window. Windows 11 ships Edge, so this is
+normally already true.
 
 **Portal access.** You need to be able to sign in to the Maryland Judiciary case
 portal and see your case's documents. The app automates the browser you already
 use; it cannot grant access you don't have.
 
-## Core install
+## Install
+
+1. Download the latest `MDEC-Docket-Manager-*.zip` from
+   [Releases](https://github.com/sasha-thecornerspore-dev/mdec-docket-manager/releases).
+2. Unzip it wherever you want to keep it. The app runs from that folder — moving
+   it later means running `Install.cmd` again to fix the shortcuts.
+3. Double-click **`Install.cmd`** and follow it.
+
+It installs the Python packages, downloads the private Chromium the app drives
+(~130 MB, once), generates the icon, and creates Desktop and Start Menu
+shortcuts. Nothing goes into system directories and nothing is sent anywhere.
+
+Then open **MDEC Docket Manager** from your Desktop.
+
+### From a git clone
+
+Same thing — `Install.cmd` works in a clone and is still the easiest path:
 
 ```bash
 git clone https://github.com/sasha-thecornerspore-dev/mdec-docket-manager.git
 cd mdec-docket-manager
-python -m pip install -r requirements.txt
-python -m playwright install chromium
+Install.cmd
 ```
 
-`playwright install chromium` downloads a private copy of Chromium (~130 MB).
-This is separate from your everyday Chrome and keeps its own logged-in profile
-under `%APPDATA%\MDECDocketManager\.pw-profile`.
-
-Start it:
+Or by hand, if you'd rather not have shortcuts:
 
 ```bash
+python -m pip install -r requirements.txt
+python -m playwright install chromium
 python run.py
 ```
 
-| Flag | Effect |
+### Running it from a terminal
+
+| Command | Effect |
 |---|---|
-| *(none)* | Serve and open the UI in your default browser |
-| `--window` | Open in a native desktop window (needs `pip install pywebview`) |
-| `--no-open` | Serve only; open <http://127.0.0.1:8674> yourself |
-| `--port N` | Use a different port |
+| `python run.py` | Serve and open the UI in your default browser |
+| `python run.py --app` | Open the chromeless app window (what the icon does) |
+| `python run.py --no-open` | Serve only; open <http://127.0.0.1:8674> yourself |
+| `python run.py --port 8675` | Use a different port |
+
+## How launching works
+
+The Desktop icon runs `MDEC Docket Manager.pyw` through `pythonw.exe`, so there
+is no console window. It starts the service, waits for it to answer, then opens
+the UI as an Edge or Chrome **app window** — chromeless, its own taskbar button,
+no address bar. That avoids depending on a GUI toolkit that would be one more
+thing to install and go wrong.
+
+Three behaviors worth knowing:
+
+- **Closing the window leaves the service running**, so scheduled checks
+  continue. Clicking the icon again reopens the window immediately.
+- **Launching twice reuses the running service** — you can't accidentally start
+  two monitors pointed at the same case.
+- **If port 8674 is taken** the app moves to the next free port and records it in
+  `%APPDATA%\MDECDocketManager\runtime.json`, so the icon still finds it.
+
+To stop the service, use **Settings → Quit app**.
+
+## Building a release zip
+
+```bash
+python tools/make_release.py
+```
+
+Writes `dist/MDEC-Docket-Manager-<version>.zip` containing the app, icon, docs,
+and installer — no runtime data, no case data.
 
 ## Where your data lives
 
@@ -116,14 +163,12 @@ one (`claude-sonnet-5`).
   you control.
 - **ChromaDB** — upserts into a local collection. Needs `pip install chromadb`.
 
-## Optional: native window
-
-```bash
-python -m pip install pywebview
-python run.py --window
-```
-
 ## Upgrading
+
+From a release zip: unzip the new version over the old folder (or beside it and
+re-run `Install.cmd` so the shortcuts point at the new one).
+
+From a clone:
 
 ```bash
 git pull
@@ -136,7 +181,17 @@ appear with sensible values and your existing ones are preserved.
 
 ## Uninstall
 
-Delete the repo folder, then delete `%APPDATA%\MDECDocketManager\`. To remove
-stored credentials, clear each secret field in Settings and save before deleting,
-or remove the `mdec-docket-manager` entries from Windows Credential Manager
-(Control Panel → Credential Manager → Windows Credentials).
+Run **`Uninstall.cmd`** — it removes the Desktop and Start Menu shortcuts and
+touches nothing else.
+
+To remove everything:
+
+1. `Uninstall.cmd` (shortcuts)
+2. Delete the app folder
+3. Delete `%APPDATA%\MDECDocketManager\` (cases, notes, analyses, browser session)
+4. Credentials: clear each secret field in Settings and save *before* deleting, or
+   remove the `mdec-docket-manager` entries from Windows Credential Manager
+   (Control Panel → Credential Manager → Windows Credentials)
+
+Your downloaded court documents are in the folder you chose per case and are
+never touched by any of this.

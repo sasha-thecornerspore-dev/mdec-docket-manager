@@ -24,3 +24,7 @@ Thumbs.db
 .DS_Store
 .vscode/
 .idea/
+
+# Release artifacts (attached to GitHub Releases, not committed)
+dist/
+

@@ -468,6 +468,41 @@ def test_case_folder_defaults_to_a_subfolder_per_case(monkeypatch):
         assert folder == str(Path(r"D:\Cases") / "C01cv24001234")
 
 
+def test_desktop_picks_the_configured_port_when_free():
+    from mdec import desktop
+    import socket
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+        s.bind(("127.0.0.1", 0))
+        free = s.getsockname()[1]
+    # the port closed with the `with` block, so it should be pickable
+    assert desktop.pick_port("127.0.0.1", free) == free
+
+
+def test_desktop_falls_back_when_the_port_is_taken():
+    """An unrelated program on the default port must not make the app unstartable."""
+    from mdec import desktop
+    import socket
+    squatter = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    squatter.bind(("127.0.0.1", 0))
+    squatter.listen(1)
+    taken = squatter.getsockname()[1]
+    try:
+        chosen = desktop.pick_port("127.0.0.1", taken)
+        assert chosen is not None and chosen != taken
+        assert chosen > taken
+    finally:
+        squatter.close()
+
+
+def test_desktop_reports_a_dead_server_as_down():
+    from mdec import desktop
+    import socket
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+        s.bind(("127.0.0.1", 0))
+        port = s.getsockname()[1]
+    assert desktop.server_is_up(f"http://127.0.0.1:{port}/", timeout=0.5) is False
+
+
 def test_updating_a_case_folder_sticks(temp_db):
     db = temp_db
     cid = db.upsert_case("C-01-CV-24-001234", downloads="A:/old")

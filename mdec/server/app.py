@@ -22,6 +22,7 @@ from ..pipeline import analyzer, ocr, renamer
 from ..portal import browser as br
 
 STATIC = Path(__file__).parent / "static"
+ASSETS = Path(__file__).resolve().parent.parent.parent / "assets"
 
 app = FastAPI(title="MDEC Docket Manager", version=__version__)
 
@@ -65,6 +66,16 @@ def _case_folder(case: dict) -> Path:
                 config.default_case_folder(case["case_number"]))
 
 
+# --- readiness -------------------------------------------------------------
+
+@app.get("/api/ping")
+async def api_ping():
+    """Cheapest possible liveness check. The desktop launcher polls this to know
+    when to open the window — it must not touch keyring, OCR, or the database,
+    or the window waits on feature detection instead of on the server."""
+    return {"ok": True, "version": __version__}
+
+
 # --- status / dashboard ----------------------------------------------------
 
 @app.get("/api/status")
@@ -78,12 +89,6 @@ async def api_status():
         _set_active(case["case_number"])
     entries = db.list_entries(case["id"]) if case else []
     docs = db.list_documents(case["id"]) if case else []
-    ocr_ok, ocr_why = ocr.available()
-    try:
-        backend, _ = analyzer.resolve_backend(cfg)
-        analysis_backend, analysis_why = backend, ""
-    except analyzer.AnalyzerNotConfigured as exc:
-        analysis_backend, analysis_why = "none", str(exc)
     folder = _case_folder(case) if case else None
     return {
         "version": __version__,
@@ -105,17 +110,31 @@ async def api_status():
         "schedule": cfg["schedule"],
         "login_mode": cfg["login"]["mode"],
         "browser_running": br.browser.running,
-        "features": {
-            "ocr_enabled": cfg["ocr"]["enabled"],
-            "ocr_available": ocr_ok,
-            "ocr_why": ocr_why,
-            "analysis_enabled": cfg["analysis"]["enabled"],
-            "analysis_backend": analysis_backend,
-            "analysis_why": analysis_why,
-            "rag_targets": [k for k in ("folder", "webhook", "chroma")
-                            if cfg["rag"].get(f"{k}_enabled")],
-        },
         "runs": db.list_runs(5),
+    }
+
+
+@app.get("/api/features")
+async def api_features():
+    """Feature readiness, split out of /api/status because detecting it imports
+    keyring and probes PATH — seconds on a cold process. The UI paints the
+    dashboard from /api/status first, then fills the checklist from here."""
+    cfg = config.load_config()
+    ocr_ok, ocr_why = ocr.available()
+    try:
+        backend, _ = analyzer.resolve_backend(cfg)
+        analysis_backend, analysis_why = backend, ""
+    except analyzer.AnalyzerNotConfigured as exc:
+        analysis_backend, analysis_why = "none", str(exc)
+    return {
+        "ocr_enabled": cfg["ocr"]["enabled"],
+        "ocr_available": ocr_ok,
+        "ocr_why": ocr_why,
+        "analysis_enabled": cfg["analysis"]["enabled"],
+        "analysis_backend": analysis_backend,
+        "analysis_why": analysis_why,
+        "rag_targets": [k for k in ("folder", "webhook", "chroma")
+                        if cfg["rag"].get(f"{k}_enabled")],
     }
 
 
@@ -395,6 +414,41 @@ async def api_analyze_case():
 async def api_close_browser():
     await br.browser.stop()
     return {"ok": True, "message": "Browser closed."}
+
+
+@app.post("/api/actions/quit")
+async def api_quit():
+    """Stop the service. Closing the app window leaves it running on purpose
+    (scheduled checks need it), so this is the way to actually shut down."""
+    if monitor.status.get("busy"):
+        return {"ok": False, "message":
+                "A check is running. Wait for it to finish before quitting — "
+                "stopping mid-download leaves the run incomplete."}
+    asyncio.get_running_loop().call_later(0.3, _hard_exit)
+    return {"ok": True, "message": "Shutting down. You can close this window."}
+
+
+def _hard_exit() -> None:
+    import os
+    import signal
+    # Terminating skips atexit on Windows, so clear the runtime marker here or
+    # the next launch reads a port nothing is listening on.
+    try:
+        (config.app_dir() / "runtime.json").unlink(missing_ok=True)
+    except OSError:
+        pass
+    os.kill(os.getpid(), signal.SIGTERM)
+
+
+# --- icon ------------------------------------------------------------------
+
+@app.get("/favicon.ico", include_in_schema=False)
+async def favicon():
+    """Also what Edge/Chrome use for the app window's taskbar icon."""
+    ico = ASSETS / "mdec.ico"
+    if not ico.is_file():
+        raise HTTPException(404, "Icon not generated. Run tools/make_icon.py.")
+    return FileResponse(ico, media_type="image/x-icon")
 
 
 class RepairIn(BaseModel):

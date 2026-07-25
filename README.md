@@ -39,17 +39,38 @@ activity), **Docket** (the ledger — new filings are stamped and notched in the
 sequence spine), **Documents** (file table), **Notes**, **Analysis**,
 **Activity** (run log), **Settings** (cases and everything else).
 
-## Quick start
+## Install
+
+1. Download the latest **MDEC-Docket-Manager-*.zip* from
+   [Releases](https://github.com/sasha-thecornerspore-dev/mdec-docket-manager/releases).
+2. Unzip it anywhere you like (it stays there — this is not a system install).
+3. Double-click **`Install.cmd`**.
+
+That installs the Python packages, downloads the private browser it drives, and
+puts a **MDEC Docket Manager** icon on your Desktop and in the Start Menu. You
+need [Python 3.11+](https://www.python.org/downloads/) first — tick *"Add
+python.exe to PATH"* when installing it.
+
+From then on it's just the icon. No terminal, no console window: the app opens in
+its own window in about three seconds.
+
+<details>
+<summary>Prefer to run from source?</summary>
 
 ```bash
 git clone https://github.com/sasha-thecornerspore-dev/mdec-docket-manager.git
 cd mdec-docket-manager
 python -m pip install -r requirements.txt
 python -m playwright install chromium
-python run.py
+python run.py            # or: python run.py --app   for the app window
 ```
 
-The UI opens at <http://127.0.0.1:8674>. Then:
+`Install.cmd` works in a clone too, and is the easier path — it creates the icon.
+</details>
+
+## First run
+
+Open the app from its icon, then:
 
 1. **Settings → Cases** — add your case number (e.g. `C-01-CV-24-001234`) and
    pick a document folder with **Browse…**. Add as many cases as you track.
@@ -66,6 +87,19 @@ analysis — is optional and off by default.
 they're named the old `Title-caseid (2).pdf` way, run the repair rename first.
 
 For the full first-run walkthrough see **[docs/WALKTHROUGH.md](docs/WALKTHROUGH.md)**.
+
+## How the app behaves
+
+**Closing the window doesn't quit it.** The service keeps running so scheduled
+checks still happen — that's the point of monitoring. Clicking the icon again
+brings the window back instantly. To actually stop it, use **Settings → Quit
+app**.
+
+**One instance, whatever you click.** Launching twice reuses the running service
+instead of starting a second monitor.
+
+**It finds a free port.** If something else is using 8674 it moves to the next
+one available and remembers where it went.
 
 ## Documentation
 
@@ -101,10 +135,11 @@ Use this only for a case you have lawful access to.
 
 ## Requirements
 
-- Windows 10/11 (the app is cross-platform Python, but credential storage and
-  the default paths assume Windows)
-- Python 3.11+
-- Playwright's Chromium (`python -m playwright install chromium`)
+- Windows 10/11 (the app is cross-platform Python, but credential storage, the
+  installer, and the default paths assume Windows)
+- Python 3.11+ — the one thing you install yourself
+- Edge or Chrome, for the app window (Windows 11 has Edge already)
+- Everything else `Install.cmd` handles: Python packages and Playwright's Chromium
 - Optional, for OCR: Tesseract and Ghostscript
 - Optional, for subscription analysis: the Claude Code CLI, signed in
 

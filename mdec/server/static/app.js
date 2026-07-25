@@ -3,7 +3,8 @@
 const $  = (s, r = document) => r.querySelector(s);
 const $$ = (s, r = document) => [...r.querySelectorAll(s)];
 
-const state = { status: null, entries: [], docs: [], settings: null, secrets: {} };
+const state = { status: null, features: null, entries: [], docs: [],
+                settings: null, secrets: {} };
 let lastSeenSeq = Number(localStorage.getItem('mdec.lastSeenSeq') || 0);
 
 /* --- helpers ----------------------------------------------------------- */
@@ -150,12 +151,37 @@ async function loadStatus() {
   $('#dashRuns').innerHTML = s.runs.length
     ? s.runs.map(runRow).join('') : '<p class="empty">No checks have run yet.</p>';
 
-  const f = s.features;
+  renderChecklist();
+}
+
+/** Feature readiness arrives separately — detecting it is slow on a cold start,
+ *  and the dashboard shouldn't wait on it to paint. */
+async function loadFeatures() {
+  try { state.features = await api('/features'); }
+  catch { return; }
+  renderChecklist();
+  const f = state.features;
+  const ocrEl = $('#ocrState'), anEl = $('#analysisState');
+  if (ocrEl) ocrEl.textContent = f.ocr_available
+    ? 'OCR tools found (Tesseract + Ghostscript).' : f.ocr_why;
+  if (anEl) anEl.textContent = f.analysis_backend === 'none'
+    ? f.analysis_why : `Using the ${f.analysis_backend === 'cli'
+      ? 'Claude subscription via the Claude Code CLI' : 'Anthropic API'}.`;
+}
+
+function renderChecklist() {
+  const s = state.status;
+  if (!s) return;
+  const f = state.features;
   const rows = [
-    [!!s.case.case_number, 'Case number set',
-      'Add the case number in Settings.'],
+    [!!s.case.case_number, 'Case added',
+      'Add a case in Settings → Cases.'],
     [s.browser_running, 'Portal browser open',
       'Click "Open portal window" and sign in.'],
+    [s.schedule.enabled, `Scheduled checks at ${s.schedule.times.join(', ')}`,
+      'Scheduled checks are off.'],
+  ];
+  if (f) rows.push(
     [f.analysis_enabled && f.analysis_backend !== 'none',
       `Claude analysis (${f.analysis_backend})`,
       f.analysis_why || 'Turn on analysis in Settings.'],
@@ -163,12 +189,12 @@ async function loadStatus() {
       f.ocr_enabled ? f.ocr_why : 'OCR is off. Turn it on in Settings.'],
     [f.rag_targets.length > 0, `RAG export → ${f.rag_targets.join(', ') || 'none'}`,
       'No RAG target configured.'],
-    [s.schedule.enabled, `Scheduled checks at ${s.schedule.times.join(', ')}`,
-      'Scheduled checks are off.'],
-  ];
+  );
   $('#dashChecks').innerHTML = rows.map(([ok, good, bad]) => `
     <li><span class="mark ${ok ? 'ok' : 'no'}">${ok ? '✓' : '!'}</span>
-      <span>${esc(ok ? good : bad)}</span></li>`).join('');
+      <span>${esc(ok ? good : bad)}</span></li>`).join('') +
+    (f ? '' : '<li><span class="mark">…</span><span>Checking OCR and ' +
+              'analysis availability…</span></li>');
 }
 
 function runRow(r) {
@@ -468,13 +494,15 @@ async function loadSettings() {
     el.textContent = (set ? 'Stored in Windows Credential Manager. Type to replace, '
       + 'or clear the field and save to delete. ' : 'Not set. ') + base;
   });
-  const f = state.status?.features;
+  const f = state.features;
   if (f) {
     $('#ocrState').textContent = f.ocr_available
       ? 'OCR tools found (Tesseract + Ghostscript).' : f.ocr_why;
     $('#analysisState').textContent = f.analysis_backend === 'none'
       ? f.analysis_why : `Using the ${f.analysis_backend === 'cli'
         ? 'Claude subscription via the Claude Code CLI' : 'Anthropic API'}.`;
+  } else {
+    loadFeatures();
   }
 }
 
@@ -504,7 +532,9 @@ $('#settingsForm').addEventListener('submit', async ev => {
       el.value = '';
     }
     toast('Settings saved.');
+    state.features = null;      // toggles may have changed what's available
     await refreshAll();
+    await loadFeatures();
     loadSettings();
   } catch (e) { toast(e.message, true); }
 });
@@ -706,6 +736,27 @@ $('#btnCloseBrowser').addEventListener('click', async () => {
   } catch (e) { toast(e.message, true); }
 });
 
+$('#btnQuit').addEventListener('click', async () => {
+  if (!confirm('Quit MDEC Docket Manager?\n\nScheduled checks stop until you ' +
+               'open it again. Closing this window on its own leaves them running.')) return;
+  try {
+    const r = await api('/actions/quit', { method: 'POST' });
+    if (!r.ok) { toast(r.message, true); return; }
+    document.body.innerHTML =
+      '<div style="font-family:var(--body);padding:4rem 2rem;max-width:32rem">' +
+      '<h1 style="font-family:var(--display);font-size:1.2rem">Shut down.</h1>' +
+      '<p>You can close this window. Open the app from its icon when you need it ' +
+      'again.</p></div>';
+    clearInterval(window.__mdecPoll);
+  } catch (e) {
+    // The process may die before the response lands — that's a successful quit.
+    document.body.innerHTML =
+      '<div style="font-family:sans-serif;padding:4rem 2rem">Shut down. ' +
+      'You can close this window.</div>';
+    clearInterval(window.__mdecPoll);
+  }
+});
+
 async function repair(dryRun) {
   const folder = $('#repairFolder').value.trim();
   if (!folder) { toast('Enter the folder to rename.', true); return; }
@@ -743,8 +794,10 @@ async function refreshAll() {
 
 (async function boot() {
   await refreshAll();
+  loadFeatures();        // not awaited — the dashboard is already usable
+
   // Poll while a run is in flight so the user sees progress without refreshing.
-  setInterval(async () => {
+  window.__mdecPoll = setInterval(async () => {
     const busyBefore = state.status?.monitor?.busy;
     await loadStatus();
     if (busyBefore && !state.status?.monitor?.busy) await refreshAll();

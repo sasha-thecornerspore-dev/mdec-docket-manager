@@ -12,16 +12,23 @@ blocking — callers use a thread executor.
 
 from __future__ import annotations
 
+import functools
+import importlib.util
 import shutil
 from pathlib import Path
 
 MIN_TEXT_CHARS = 200   # below this we assume a scan with no useful text layer
 
 
+@functools.lru_cache(maxsize=1)
 def available() -> tuple[bool, str]:
-    try:
-        import ocrmypdf  # noqa: F401
-    except ImportError:
+    """Is OCR usable? Cached, and deliberately does not import ocrmypdf.
+
+    Importing ocrmypdf pulls in pikepdf and PIL and costs seconds — far too much
+    for a status call the UI polls. `find_spec` answers "is it installed?"
+    without executing it.
+    """
+    if importlib.util.find_spec("ocrmypdf") is None:
         return False, "Python package 'ocrmypdf' is not installed (pip install ocrmypdf)."
     missing = [t for t in ("tesseract", "gs") if shutil.which(t) is None]
     if missing:

@@ -6,9 +6,32 @@ means it stopped. The log names the specific entry or document.
 
 ---
 
-## Startup
+## Launching the app
+
+### Nothing happens when I click the icon
+Give it about three seconds on a cold start — there's no splash screen. If
+nothing appears after ten:
+
+1. Look for an error dialog behind other windows; the launcher reports failures
+   that way since it has no console.
+2. Open a terminal in the app folder and run `python run.py`. The same failure
+   will print with a full traceback.
+
+Most often it's missing packages — re-run `Install.cmd`.
+
+### The icon does nothing but a background process is running
+The service is up but the window didn't open, which means neither Edge nor Chrome
+was found. Open <http://127.0.0.1:8674> in any browser; the app works fine there.
+Installing Edge or Chrome restores the app window.
+
+### `Install.cmd` says Python was not found
+Python isn't on `PATH`. Reinstall from
+[python.org](https://www.python.org/downloads/) with **"Add python.exe to PATH"**
+ticked, then run `Install.cmd` again. Installing from the Microsoft Store often
+doesn't set `PATH` usefully.
 
 ### `ModuleNotFoundError` on launch
+Dependencies aren't installed. Run `Install.cmd`, or:
 ```bash
 python -m pip install -r requirements.txt
 ```
@@ -20,13 +43,24 @@ python -m playwright install chromium
 ```
 
 ### Port already in use
-Another copy is running, or something else holds 8674. Use
-`python run.py --port 8675`, or change it in Settings → it takes effect next
-launch.
+Handled automatically — the app moves to the next free port and records it in
+`%APPDATA%\MDECDocketManager\runtime.json`. If ports 8674–8693 are *all* taken
+you'll get a dialog saying so; change the port in Settings.
+
+### The app is running but I can't find the window
+Click the icon again — it reuses the running service and brings the window back.
+
+### How do I actually quit?
+**Settings → Quit app.** Closing the window deliberately leaves the service
+running so scheduled checks continue.
+
+### I moved the app folder and the icon broke
+Shortcuts point at the old path. Run `Install.cmd` in the new location to rebuild
+them.
 
 ### The browser opens to a blank page
-The server hadn't finished starting. Reload. If it persists, run with
-`--no-open` and read the console output.
+The server hadn't finished starting. Reload. If it persists, run
+`python run.py --no-open` and read the console output.
 
 ---
 
