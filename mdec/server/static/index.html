@@ -1,0 +1,279 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="auto">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>MDEC Docket Manager</title>
+<link rel="stylesheet" href="/app.css">
+</head>
+<body>
+<header class="topbar">
+  <div class="brand">
+    <span class="brand-mark" aria-hidden="true">§</span>
+    <div class="brand-text">
+      <h1 id="caseCaption">MDEC Docket Manager</h1>
+      <p class="case-line"><span id="caseNumber">No case configured</span><span
+         class="sep" aria-hidden="true">/</span><span id="caseCourt"></span></p>
+    </div>
+  </div>
+  <div class="topbar-actions">
+    <span id="monitorState" class="state" title="Monitor state">idle</span>
+    <button id="btnCheck" class="btn btn-primary">Check now</button>
+    <button id="btnPortal" class="btn">Open portal window</button>
+    <button id="btnTheme" class="btn btn-icon" title="Toggle light / dark"
+            aria-label="Toggle light or dark theme">◐</button>
+  </div>
+</header>
+
+<nav class="tabs" role="tablist">
+  <button class="tab is-active" data-tab="dashboard" role="tab">Dashboard</button>
+  <button class="tab" data-tab="docket" role="tab">Docket</button>
+  <button class="tab" data-tab="documents" role="tab">Documents</button>
+  <button class="tab" data-tab="notes" role="tab">Notes</button>
+  <button class="tab" data-tab="analysis" role="tab">Analysis</button>
+  <button class="tab" data-tab="activity" role="tab">Activity</button>
+  <button class="tab" data-tab="settings" role="tab">Settings</button>
+</nav>
+
+<div id="toast" class="toast" role="status" aria-live="polite"></div>
+
+<main>
+  <!-- DASHBOARD ------------------------------------------------------ -->
+  <section class="panel is-active" id="panel-dashboard" role="tabpanel">
+    <div class="tally" id="tally"></div>
+    <div class="split">
+      <div class="card">
+        <h2 class="card-title">Recent activity</h2>
+        <div id="dashRuns" class="runs"></div>
+      </div>
+      <div class="card">
+        <h2 class="card-title">Setup</h2>
+        <ul class="checklist" id="dashChecks"></ul>
+        <p class="fineprint">Analysis output is informational only and is not
+          legal advice. Verify every date and deadline against the docket and
+          the filings themselves.</p>
+      </div>
+    </div>
+    <div class="card">
+      <h2 class="card-title">Latest filings</h2>
+      <div id="dashLatest" class="ledger"></div>
+    </div>
+  </section>
+
+  <!-- DOCKET --------------------------------------------------------- -->
+  <section class="panel" id="panel-docket" role="tabpanel">
+    <div class="toolbar">
+      <input id="docketFilter" class="input" type="search"
+             placeholder="Filter by entry name, comment, or date">
+      <label class="check"><input type="checkbox" id="docketOnlyDocs">
+        Only entries with documents</label>
+      <button id="btnAnalyzeCase" class="btn">Write case briefing</button>
+    </div>
+    <div id="docketList" class="ledger"></div>
+  </section>
+
+  <!-- DOCUMENTS ------------------------------------------------------ -->
+  <section class="panel" id="panel-documents" role="tabpanel">
+    <div class="toolbar">
+      <input id="docFilter" class="input" type="search"
+             placeholder="Filter by filename or title">
+    </div>
+    <div class="table-scroll">
+      <table class="grid" id="docTable">
+        <thead><tr>
+          <th class="num">Seq</th><th>Filed</th><th>Document</th>
+          <th>Filename</th><th class="num">Size</th><th>OCR</th><th>RAG</th>
+          <th>Open</th>
+        </tr></thead>
+        <tbody></tbody>
+      </table>
+    </div>
+  </section>
+
+  <!-- NOTES ---------------------------------------------------------- -->
+  <section class="panel" id="panel-notes" role="tabpanel">
+    <div class="card">
+      <h2 class="card-title">New note</h2>
+      <textarea id="noteBody" class="input textarea" rows="4"
+                placeholder="What did you notice? What needs doing?"></textarea>
+      <div class="toolbar">
+        <select id="noteEntry" class="input"></select>
+        <button id="btnAddNote" class="btn btn-primary">Save note</button>
+      </div>
+    </div>
+    <div id="noteList" class="notes"></div>
+  </section>
+
+  <!-- ANALYSIS ------------------------------------------------------- -->
+  <section class="panel" id="panel-analysis" role="tabpanel">
+    <div class="toolbar">
+      <button id="btnAnalyzeCase2" class="btn btn-primary">Write case briefing</button>
+      <span class="fineprint">Informational only — not legal advice.</span>
+    </div>
+    <div id="analysisList" class="notes"></div>
+  </section>
+
+  <!-- ACTIVITY ------------------------------------------------------- -->
+  <section class="panel" id="panel-activity" role="tabpanel">
+    <div id="runList" class="runs runs-full"></div>
+  </section>
+
+  <!-- SETTINGS ------------------------------------------------------- -->
+  <section class="panel" id="panel-settings" role="tabpanel">
+    <form id="settingsForm" autocomplete="off">
+      <div class="card">
+        <h2 class="card-title">Case</h2>
+        <div class="fields">
+          <label>Case number
+            <input class="input" name="case.case_number"
+                   placeholder="C-03-CV-24-003218"></label>
+          <label>Caption
+            <input class="input" name="case.caption"
+                   placeholder="Brenner et al. vs. Schatz"></label>
+          <label>Court
+            <input class="input" name="case.court"
+                   placeholder="Baltimore County Circuit Court"></label>
+          <label>Download folder
+            <input class="input" name="folders.downloads"></label>
+        </div>
+      </div>
+
+      <div class="card">
+        <h2 class="card-title">Monitoring</h2>
+        <div class="fields">
+          <label class="check"><input type="checkbox" name="schedule.enabled">
+            Check the docket on a schedule</label>
+          <label>Check times (24h, comma separated)
+            <input class="input" name="schedule.times" placeholder="08:00, 17:00">
+            <span class="hint">Twice a day is deliberate. The portal throttles
+              rapid automation.</span></label>
+        </div>
+      </div>
+
+      <div class="card">
+        <h2 class="card-title">Portal login</h2>
+        <div class="fields">
+          <label>Mode
+            <select class="input" name="login.mode">
+              <option value="attach">Attach — I log in myself (recommended)</option>
+              <option value="managed">Managed — app logs in with stored credentials</option>
+            </select>
+            <span class="hint">Attach mode opens a browser window and remembers
+              the session. Managed mode fills your username and password and
+              reads the emailed verification code over IMAP.</span></label>
+          <label>Login URL <input class="input" name="login.login_url"></label>
+          <label>Portal username <input class="input" name="login.portal_username"></label>
+          <label>Portal password
+            <input class="input" type="password" data-secret="portal_password"
+                   placeholder="••••••••">
+            <span class="hint" data-secret-state="portal_password"></span></label>
+        </div>
+      </div>
+
+      <div class="card">
+        <h2 class="card-title">Email verification code (managed login only)</h2>
+        <div class="fields">
+          <label>IMAP host <input class="input" name="email.imap_host"></label>
+          <label>IMAP user <input class="input" name="email.imap_user"></label>
+          <label>IMAP app password
+            <input class="input" type="password" data-secret="imap_password"
+                   placeholder="••••••••">
+            <span class="hint" data-secret-state="imap_password">Gmail needs an
+              App Password, not your account password.</span></label>
+          <label>Allowed senders (comma separated)
+            <input class="input" name="email.senders"></label>
+          <label>Code pattern <input class="input" name="email.code_regex"></label>
+        </div>
+      </div>
+
+      <div class="card">
+        <h2 class="card-title">OCR</h2>
+        <div class="fields">
+          <label class="check"><input type="checkbox" name="ocr.enabled">
+            OCR scanned documents as they arrive</label>
+          <label>Language <input class="input" name="ocr.language"></label>
+          <p class="hint" id="ocrState"></p>
+        </div>
+      </div>
+
+      <div class="card">
+        <h2 class="card-title">RAG export</h2>
+        <div class="fields">
+          <label class="check"><input type="checkbox" name="rag.folder_enabled">
+            Write text + metadata to a watched folder</label>
+          <label>Folder path <input class="input" name="rag.folder_path"></label>
+          <label class="check"><input type="checkbox" name="rag.webhook_enabled">
+            POST each document to a webhook</label>
+          <label>Webhook URL <input class="input" name="rag.webhook_url"></label>
+          <label class="check"><input type="checkbox" name="rag.chroma_enabled">
+            Upsert into a local ChromaDB collection</label>
+          <label>Chroma path <input class="input" name="rag.chroma_path"></label>
+          <label>Collection <input class="input" name="rag.chroma_collection"></label>
+        </div>
+      </div>
+
+      <div class="card">
+        <h2 class="card-title">Claude analysis</h2>
+        <div class="fields">
+          <label class="check"><input type="checkbox" name="analysis.enabled">
+            Analyze new filings</label>
+          <label class="check"><input type="checkbox" name="analysis.auto_analyze_new">
+            Analyze automatically as documents arrive</label>
+          <label>Backend
+            <select class="input" name="analysis.backend">
+              <option value="auto">Auto — API key if set, else Claude subscription</option>
+              <option value="api">Anthropic API key</option>
+              <option value="subscription">Claude subscription (Claude Code CLI)</option>
+            </select>
+            <span class="hint">Subscription mode shells out to the signed-in
+              <code>claude</code> CLI, so no API key is needed.</span></label>
+          <label>Model <input class="input" name="analysis.model"></label>
+          <label>Anthropic API key
+            <input class="input" type="password" data-secret="anthropic_api_key"
+                   placeholder="••••••••">
+            <span class="hint" data-secret-state="anthropic_api_key"></span></label>
+          <p class="hint" id="analysisState"></p>
+        </div>
+      </div>
+
+      <div class="card">
+        <h2 class="card-title">Downloader pacing</h2>
+        <div class="fields">
+          <label>Breathing room per document (ms)
+            <input class="input" type="number" name="downloader.breathing_ms"></label>
+          <label>Batch size
+            <input class="input" type="number" name="downloader.batch_size"></label>
+          <label>Pause between batches (s)
+            <input class="input" type="number" step="0.5"
+                   name="downloader.batch_pause_s"></label>
+          <p class="hint">These defaults are field-tested against the portal's
+            throttle. Raising the pace risks a session refresh mid-run.</p>
+        </div>
+      </div>
+
+      <div class="sticky-save">
+        <button type="submit" class="btn btn-primary">Save settings</button>
+        <button type="button" id="btnCloseBrowser" class="btn">Close browser window</button>
+      </div>
+    </form>
+
+    <div class="card">
+      <h2 class="card-title">Repair a legacy folder</h2>
+      <p class="hint">Renames an old dump folder (files still named
+        <code>Title-caseid (2).pdf</code>) into the
+        <code>NNNN_YYYYMMDD_Description.pdf</code> catalog, matching the Nth copy
+        of a title to the Nth docket slot expecting it. Always dry-run first.
+        Sorted by file creation time, which equals download order.</p>
+      <div class="toolbar">
+        <input id="repairFolder" class="input" placeholder="D:\path\to\docket">
+        <button id="btnRepairDry" class="btn">Dry run</button>
+        <button id="btnRepairGo" class="btn btn-danger">Rename for real</button>
+      </div>
+      <div id="repairOut" class="repair-out"></div>
+    </div>
+  </section>
+</main>
+
+<script src="/app.js"></script>
+</body>
+</html>

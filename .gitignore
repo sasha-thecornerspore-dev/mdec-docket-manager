@@ -1,0 +1,26 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+.pytest_cache/
+
+# Runtime data — never commit case data or downloads
+downloads/
+*.pdf
+*.db
+*.sqlite3
+_ORIGINAL_NAMES_manifest.csv
+config.json
+*.log
+
+# Playwright profile / browser data
+.pw-profile/
+playwright/.cache/
+
+# OS / editor
+Thumbs.db
+.DS_Store
+.vscode/
+.idea/

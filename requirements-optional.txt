@@ -1,0 +1,7 @@
+# Install any of these for extra features:
+# ChromaDB RAG export target
+chromadb>=0.5
+# Native desktop window instead of a browser tab
+pywebview>=5.1
+# Test suite
+pytest>=8.0
