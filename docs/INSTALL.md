@@ -41,7 +41,7 @@ python run.py
 Everything runtime is under `%APPDATA%\MDECDocketManager\`:
 
 ```
-config.json      settings (never contains secrets)
+config.json      settings (never contains secrets or cases)
 mdec.db          SQLite: docket, documents, notes, analyses, run log
 .pw-profile\     the browser profile that holds your portal session
 downloads\       default document folder (change it in Settings)

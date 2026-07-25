@@ -13,7 +13,7 @@ and feeds them to an external RAG app, and can manage portal login (including
 retrieving the emailed verification code) or work from a manually-logged-in session.
 
 Built from the field-tested harvest method in the `mdec-docket-harvester` skill
-(950-document reference run, case C-03-CV-24-003218). All seven "hard lessons" from
+(950-document reference run, case C-01-CV-24-001234). All seven "hard lessons" from
 that run are baked into the downloader.
 
 ## Users & constraints

@@ -21,7 +21,9 @@ except the API calls you explicitly enable.
 | | |
 |---|---|
 | **Monitors** | Checks the docket on a schedule (default 08:00 and 17:00) and on demand. Detects new entries by fingerprint, so a title that repeats 146 times still diffs correctly. |
+| **Handles many cases** | Track as many as you like, each with its own folder, docket, notes, and analyses. Switch from the top bar; scheduled checks walk every monitored case in turn. |
 | **Downloads** | Pulls every document from new entries, including multi-file popups. Paced to stay under the portal's throttle. |
+| **Never starts over** | Every check first adopts files already on disk, then downloads only what's genuinely missing. An interrupted 950-document harvest resumes where it stopped; a rebuilt database re-adopts the folder instead of re-fetching it. |
 | **Names** | Files land as `NNNN_YYYYMMDD_Description.pdf` where `NNNN` is the docket sequence. Naming is deterministic — the app knows which entry each file came from. |
 | **Repairs** | Renames a legacy dump folder into the same catalog using occurrence-counted matching, with a dry run and a reversible manifest. |
 | **Notes** | Per-entry and case-level notes, kept alongside the docket. |
@@ -32,10 +34,10 @@ except the API calls you explicitly enable.
 
 ## Screens
 
-Seven tabs: **Dashboard** (counts, setup checklist, recent activity), **Docket**
-(the ledger — new filings are stamped and notched in the sequence spine),
-**Documents** (sortable file table), **Notes**, **Analysis**, **Activity** (run
-log), **Settings**.
+Seven tabs: **Dashboard** (counts, setup checklist, document folder, recent
+activity), **Docket** (the ledger — new filings are stamped and notched in the
+sequence spine), **Documents** (file table), **Notes**, **Analysis**,
+**Activity** (run log), **Settings** (cases and everything else).
 
 ## Quick start
 
@@ -49,15 +51,19 @@ python run.py
 
 The UI opens at <http://127.0.0.1:8674>. Then:
 
-1. **Settings → Case** — enter your case number (e.g. `C-03-CV-24-003218`) and a
-   download folder. Save.
+1. **Settings → Cases** — add your case number (e.g. `C-01-CV-24-001234`) and
+   pick a document folder with **Browse…**. Add as many cases as you track.
 2. **Open portal window** — a browser window opens on your case page. Sign in
    yourself. The session is remembered for later runs.
-3. **Check now** — the app reads the docket, downloads anything new, names it,
-   and records the run.
+3. **Check now** — the app reads the docket, adopts anything already in the
+   folder, downloads the rest, names it, and records the run.
 
 That's the whole loop. Everything else — automated login, OCR, RAG export,
 analysis — is optional and off by default.
+
+**Already have the PDFs?** Point the case's folder at them. If they follow the
+`NNNN_YYYYMMDD_…` convention the app adopts them instead of re-downloading; if
+they're named the old `Title-caseid (2).pdf` way, run the repair rename first.
 
 For the full first-run walkthrough see **[docs/WALKTHROUGH.md](docs/WALKTHROUGH.md)**.
 
@@ -108,9 +114,10 @@ Use this only for a case you have lawful access to.
 python -m pytest tests -q
 ```
 
-26 tests cover the diffing logic, catalog naming, the occurrence-counted repair
-rename, verification-code extraction, and the database layer. They need no
-network, no browser, and no API key.
+44 tests cover the diffing logic, catalog naming, the occurrence-counted repair
+rename, adopting files already on disk, resume/gap tracking, case isolation,
+verification-code extraction, and the database layer. They need no network, no
+browser, and no API key.
 
 ## License
 

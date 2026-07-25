@@ -91,7 +91,7 @@ def place_download(tmp_path: Path, folder: Path, seq: int, file_date: str,
 # --- legacy repair mode ----------------------------------------------------
 
 def stem_of(filename: str, case_id: str) -> str:
-    """'Order to Docket-C03cv24003218 (3).pdf' -> 'Order to Docket'."""
+    """'Order to Docket-C01cv24001234 (3).pdf' -> 'Order to Docket'."""
     s = Path(filename).stem
     s = _SUFFIX.sub("", s)
     tail = f"-{case_id}"

@@ -87,7 +87,7 @@ function loadTab(name) {
   if (name === 'notes')     loadNotes();
   if (name === 'analysis')  loadAnalyses();
   if (name === 'activity')  loadRuns();
-  if (name === 'settings')  loadSettings();
+  if (name === 'settings')  { loadSettings(); loadCases(); }
 }
 
 /* --- theme ------------------------------------------------------------- */
@@ -110,9 +110,25 @@ async function loadStatus() {
   catch (e) { toast('Could not read status: ' + e.message, true); return; }
   const s = state.status;
 
-  $('#caseCaption').textContent = s.case.caption || 'MDEC Docket Manager';
-  $('#caseNumber').textContent = s.case.case_number || 'No case configured';
+  $('#caseCaption').textContent = s.case.caption || s.case.case_number ||
+    'MDEC Docket Manager';
+  $('#caseNumber').textContent = s.case.case_number || 'No case yet';
   $('#caseCourt').textContent = s.case.court || '';
+
+  // case switcher
+  const sw = $('#caseSwitch');
+  sw.innerHTML = (s.cases || []).map(c =>
+    `<option value="${c.id}">${esc(c.case_number)}${
+      c.caption ? ' — ' + esc(c.caption.slice(0, 40)) : ''}</option>`).join('') ||
+    '<option value="">No cases — add one in Settings</option>';
+  if (s.case.id) sw.value = String(s.case.id);
+  sw.disabled = !(s.cases || []).length;
+
+  $('#dashFolder').textContent = s.case_folder || '—';
+  const fs = $('#dashFolderState');
+  fs.textContent = s.case_folder
+    ? (s.case_folder_exists ? 'exists' : 'not created yet') : '';
+  fs.className = 'chip ' + (s.case_folder_exists ? 'ok' : 'warn');
   const st = $('#monitorState');
   st.textContent = s.monitor.message || 'idle';
   st.title = s.monitor.message || 'idle';
@@ -121,12 +137,14 @@ async function loadStatus() {
 
   const c = s.counts;
   const cells = [
-    ['Docket entries', c.entries], ['Documents', c.documents],
-    ['OCR done', c.ocr_done], ['Sent to RAG', c.rag_exported],
-    ['Notes', c.notes], ['Analyses', c.analyses],
+    ['Docket entries', c.entries, false], ['Documents', c.documents, false],
+    ['Awaiting download', c.missing, c.missing > 0],
+    ['OCR done', c.ocr_done, false], ['Sent to RAG', c.rag_exported, false],
+    ['Notes', c.notes, false], ['Analyses', c.analyses, false],
   ];
-  $('#tally').innerHTML = cells.map(([k, n]) => `
-    <div class="tally-cell"><span class="tally-n">${n}</span>
+  $('#tally').innerHTML = cells.map(([k, n, alert]) => `
+    <div class="tally-cell ${alert ? 'is-alert' : ''}">
+      <span class="tally-n">${n}</span>
       <span class="tally-k">${k}</span></div>`).join('');
 
   $('#dashRuns').innerHTML = s.runs.length
@@ -491,7 +509,167 @@ $('#settingsForm').addEventListener('submit', async ev => {
   } catch (e) { toast(e.message, true); }
 });
 
+/* --- cases ------------------------------------------------------------- */
+
+$('#caseSwitch').addEventListener('change', async ev => {
+  const id = ev.target.value;
+  if (!id) return;
+  try {
+    await api(`/cases/${id}/activate`, { method: 'POST' });
+    // A different case means different entries, documents, notes — reset the
+    // "new since" mark so one case's marks don't leak onto another.
+    lastSeenSeq = 0;
+    localStorage.setItem('mdec.lastSeenSeq', '0');
+    await refreshAll();
+    loadTab($('.tab.is-active').dataset.tab);
+    toast('Switched case.');
+  } catch (e) { toast(e.message, true); }
+});
+
+async function loadCases() {
+  const d = await api('/cases');
+  const rows = d.cases.map(c => `
+    <div class="case-row ${c.case_number === d.active ? 'is-active' : ''}"
+         data-case="${c.id}">
+      <div class="case-row-head">
+        <span class="case-row-num">${esc(c.case_number)}</span>
+        <span class="case-row-caption">${esc(c.caption || '—')}</span>
+        <span class="chip">${c.entry_count} entries</span>
+        <span class="chip">${c.doc_count} docs</span>
+        ${c.case_number === d.active ? '<span class="stamp">Active</span>' : ''}
+      </div>
+      <div class="case-row-fields">
+        <label>Caption <input class="input" data-f="caption"
+               value="${esc(c.caption || '')}"></label>
+        <label>Court <input class="input" data-f="court"
+               value="${esc(c.court || '')}"></label>
+        <label>Document folder
+          <span class="folder-picker">
+            <input class="input" data-f="downloads"
+                   value="${esc(c.downloads || c.resolved_folder || '')}">
+            <button type="button" class="btn" data-browse-field="${c.id}">Browse…</button>
+          </span></label>
+        <label class="check"><input type="checkbox" data-f="monitor_enabled"
+               ${c.monitor_enabled ? 'checked' : ''}> Include in scheduled checks</label>
+      </div>
+      <div class="case-row-tools">
+        <button type="button" class="btn-mini" data-case-save="${c.id}">Save</button>
+        ${c.case_number === d.active ? ''
+          : `<button type="button" class="btn-mini" data-case-activate="${c.id}">Make active</button>`}
+        <button type="button" class="btn-mini" data-case-del="${c.id}"
+                data-num="${esc(c.case_number)}">Stop tracking</button>
+      </div>
+    </div>`).join('');
+  $('#caseList').innerHTML = rows ||
+    '<div class="case-row"><p class="empty">No cases yet. Add one below.</p></div>';
+}
+
+$('#btnAddCase').addEventListener('click', async () => {
+  const payload = {
+    case_number: $('#newCaseNumber').value.trim(),
+    caption: $('#newCaseCaption').value.trim(),
+    court: $('#newCaseCourt').value.trim(),
+    downloads: $('#newCaseFolder').value.trim(),
+    monitor_enabled: $('#newCaseMonitor').checked,
+  };
+  if (!payload.case_number) { toast('Enter a case number.', true); return; }
+  try {
+    const r = await api('/cases', { method: 'POST', body: JSON.stringify(payload) });
+    toast(`Added ${payload.case_number}. Documents go to ${r.folder}`);
+    ['newCaseNumber', 'newCaseCaption', 'newCaseCourt', 'newCaseFolder']
+      .forEach(id => { $('#' + id).value = ''; });
+    lastSeenSeq = 0;
+    localStorage.setItem('mdec.lastSeenSeq', '0');
+    await refreshAll();
+    loadCases();
+  } catch (e) { toast(e.message, true); }
+});
+
+$('#caseList').addEventListener('click', async ev => {
+  const row = ev.target.closest('.case-row');
+  const save = ev.target.closest('[data-case-save]');
+  const act  = ev.target.closest('[data-case-activate]');
+  const del  = ev.target.closest('[data-case-del]');
+  const browse = ev.target.closest('[data-browse-field]');
+
+  if (browse) {
+    const input = row.querySelector('[data-f="downloads"]');
+    await pickInto(input);
+    return;
+  }
+  if (save) {
+    const get = f => row.querySelector(`[data-f="${f}"]`);
+    const payload = {
+      case_number: row.querySelector('.case-row-num').textContent.trim(),
+      caption: get('caption').value.trim(),
+      court: get('court').value.trim(),
+      downloads: get('downloads').value.trim(),
+      monitor_enabled: get('monitor_enabled').checked,
+    };
+    try {
+      await api(`/cases/${save.dataset.caseSave}`, {
+        method: 'PUT', body: JSON.stringify(payload) });
+      toast('Case saved.');
+      await refreshAll();
+      loadCases();
+    } catch (e) { toast(e.message, true); }
+  }
+  if (act) {
+    try {
+      await api(`/cases/${act.dataset.caseActivate}/activate`, { method: 'POST' });
+      lastSeenSeq = 0;
+      localStorage.setItem('mdec.lastSeenSeq', '0');
+      await refreshAll();
+      loadCases();
+      toast('Switched case.');
+    } catch (e) { toast(e.message, true); }
+  }
+  if (del) {
+    if (!confirm(`Stop tracking ${del.dataset.num}?\n\nThis forgets its docket, ` +
+                 `notes, and analyses. Downloaded PDFs are NOT deleted.`)) return;
+    try {
+      const r = await api(`/cases/${del.dataset.caseDel}`, { method: 'DELETE' });
+      toast(r.message);
+      await refreshAll();
+      loadCases();
+    } catch (e) { toast(e.message, true); }
+  }
+});
+
+/* --- folder picker ----------------------------------------------------- */
+
+async function pickInto(input) {
+  try {
+    const r = await api('/actions/pick-folder', {
+      method: 'POST', body: JSON.stringify({ initial: input.value || '' })});
+    if (r.path) input.value = r.path;      // empty path = user cancelled
+  } catch (e) { toast(e.message, true); }
+}
+
+document.addEventListener('click', async ev => {
+  const byId = ev.target.closest('[data-browse]');
+  if (byId) { await pickInto($('#' + byId.dataset.browse)); return; }
+  const byName = ev.target.closest('[data-browse-name]');
+  if (byName) await pickInto($(`[name="${byName.dataset.browseName}"]`));
+});
+
 /* --- actions ----------------------------------------------------------- */
+
+$('#btnAdopt').addEventListener('click', async () => {
+  const b = $('#btnAdopt');
+  b.disabled = true; b.textContent = 'Scanning…';
+  try {
+    const r = await api('/actions/adopt', { method: 'POST' });
+    toast(r.message, !r.ok);
+    $('#adoptOut').innerHTML = r.ok && r.orphan_count
+      ? `<p class="hint">Files with no matching docket entry (left alone):</p>` +
+        r.orphans.map(o => `<div class="r-row r-unmatched"><span>orphan</span>
+          <span>${esc(o)}</span><span>—</span></div>`).join('')
+      : '';
+    await refreshAll();
+  } catch (e) { toast(e.message, true); }
+  finally { b.disabled = false; b.textContent = 'Adopt files already in this folder'; }
+});
 
 $('#btnCheck').addEventListener('click', async () => {
   const b = $('#btnCheck');
@@ -500,8 +678,8 @@ $('#btnCheck').addEventListener('click', async () => {
     const r = await api('/actions/check-now', { method: 'POST' });
     toast(r.ok
       ? `Check finished: ${r.new_entries} new ${
-          r.new_entries === 1 ? 'entry' : 'entries'}, ${r.new_documents} new ${
-          r.new_documents === 1 ? 'document' : 'documents'}.` +
+          r.new_entries === 1 ? 'entry' : 'entries'}, ${r.new_documents} ` +
+        `downloaded${r.adopted ? `, ${r.adopted} adopted from disk` : ''}.` +
         (r.warnings?.length ? ` ${r.warnings.length} warning(s) — see Activity.` : '')
       : r.message, !r.ok);
     await refreshAll();

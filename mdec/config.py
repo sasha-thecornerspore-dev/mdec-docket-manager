@@ -24,13 +24,13 @@ CASESEARCH_URL = (
 )
 
 DEFAULTS: dict = {
-    "case": {
-        "case_number": "",        # as printed, e.g. C-03-CV-24-003218
-        "caption": "",
-        "court": "",
-    },
+    # Cases live in the database (one row each, with their own download folder).
+    # Config only remembers which one the UI is looking at.
+    "active_case_number": "",
     "folders": {
-        "downloads": "",          # where renamed PDFs live; default set on first save
+        # Parent folder for new cases: each gets <root>\<case-id>\ unless you
+        # point it somewhere else.
+        "downloads_root": "",
     },
     "schedule": {
         "enabled": True,
@@ -109,18 +109,57 @@ def load_config() -> dict:
     p = config_path()
     if p.exists():
         try:
-            return _merge(DEFAULTS, json.loads(p.read_text(encoding="utf-8")))
+            loaded = json.loads(p.read_text(encoding="utf-8"))
+            cfg = _merge(DEFAULTS, loaded)
+            _carry_forward_single_case(cfg, loaded)
+            if not cfg["folders"]["downloads_root"]:
+                cfg["folders"]["downloads_root"] = str(app_dir() / "downloads")
+            return cfg
         except (json.JSONDecodeError, OSError):
             pass  # fall through to defaults; a corrupt file shouldn't brick the app
     cfg = copy.deepcopy(DEFAULTS)
-    cfg["folders"]["downloads"] = str(app_dir() / "downloads")
+    cfg["folders"]["downloads_root"] = str(app_dir() / "downloads")
     return cfg
+
+
+def _carry_forward_single_case(cfg: dict, loaded: dict) -> None:
+    """Adopt a pre-multi-case config: the old single `case` block becomes the
+    active case, and its `folders.downloads` becomes that case's folder."""
+    old = loaded.get("case") or {}
+    number = old.get("case_number", "")
+    if number and not cfg.get("active_case_number"):
+        cfg["active_case_number"] = number
+    cfg.pop("case", None)
+    old_folder = (loaded.get("folders") or {}).get("downloads", "")
+    if old_folder and not cfg["folders"]["downloads_root"]:
+        cfg["folders"]["downloads_root"] = str(Path(old_folder).parent)
+    if number and old_folder:
+        # Recorded so the DB can pick it up on next load without losing it.
+        cfg["_migrate_case"] = {
+            "case_number": number, "caption": old.get("caption", ""),
+            "court": old.get("court", ""), "downloads": old_folder,
+        }
+
+
+def default_case_folder(case_number: str, cfg: dict | None = None) -> str:
+    cfg = cfg or load_config()
+    root = cfg["folders"]["downloads_root"] or str(app_dir() / "downloads")
+    return str(Path(root) / normalize_case_id(case_number))
 
 
 def save_config(cfg: dict) -> None:
     for name in SECRET_NAMES:  # belt-and-suspenders: secrets must never land in JSON
         _strip_key(cfg, name)
     config_path().write_text(json.dumps(cfg, indent=2), encoding="utf-8")
+
+
+def consume_case_migration() -> dict | None:
+    """Return (once) the pre-multi-case case block so the DB can adopt it."""
+    cfg = load_config()
+    pending = cfg.pop("_migrate_case", None)
+    if pending:
+        save_config(cfg)
+    return pending
 
 
 def _strip_key(d: dict, key: str) -> None:
@@ -131,7 +170,7 @@ def _strip_key(d: dict, key: str) -> None:
 
 
 def normalize_case_id(case_number: str) -> str:
-    """'C-03-CV-24-003218' -> 'C03cv24003218' (portal URL format)."""
+    """'C-01-CV-24-001234' -> 'C01cv24001234' (portal URL format)."""
     s = re.sub(r"[^A-Za-z0-9]", "", case_number.strip())
     if not s:
         return ""

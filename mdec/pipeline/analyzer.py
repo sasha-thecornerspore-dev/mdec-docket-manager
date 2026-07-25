@@ -53,6 +53,7 @@ DOCUMENT TEXT:
 
 CASE_PROMPT = """Case: {case_number} ({caption})
 
+
 Below is the docket (sequence, date, entry name) and stored summaries of analyzed
 documents. Write a "state of the case" briefing in markdown: current procedural
 posture, active disputes/pending motions, upcoming or likely deadlines, and a

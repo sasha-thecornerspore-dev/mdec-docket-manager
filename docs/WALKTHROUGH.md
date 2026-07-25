@@ -5,31 +5,38 @@ UI at <http://127.0.0.1:8674>.
 
 - [1. First run](#1-first-run)
 - [2. Reading the docket](#2-reading-the-docket)
-- [3. Notes](#3-notes)
-- [4. Claude analysis](#4-claude-analysis)
-- [5. Automated login with an emailed code](#5-automated-login-with-an-emailed-code)
-- [6. Scheduled monitoring](#6-scheduled-monitoring)
-- [7. OCR and RAG export](#7-ocr-and-rag-export)
-- [8. Repairing a legacy folder](#8-repairing-a-legacy-folder)
-- [9. Backing up](#9-backing-up)
+- [3. Tracking several cases](#3-tracking-several-cases)
+- [4. Importing an archive you already have](#4-importing-an-archive-you-already-have)
+- [5. Notes](#5-notes)
+- [6. Claude analysis](#6-claude-analysis)
+- [7. Automated login with an emailed code](#7-automated-login-with-an-emailed-code)
+- [8. Scheduled monitoring](#8-scheduled-monitoring)
+- [9. OCR and RAG export](#9-ocr-and-rag-export)
+- [10. Repairing a legacy folder](#10-repairing-a-legacy-folder)
+- [11. Backing up](#11-backing-up)
 
 ---
 
 ## 1. First run
 
-### Configure the case
+### Add your case
 
-Go to **Settings → Case**:
+Go to **Settings → Cases → Add a case**:
 
 | Field | Example | Notes |
 |---|---|---|
-| Case number | `C-03-CV-24-003218` | Type it as printed, with dashes. The app converts it to the portal's URL form (`C03cv24003218`) itself. |
-| Caption | `Brenner et al. vs. Schatz` | Shown in the title bar. Cosmetic. |
-| Court | `Baltimore County Circuit Court` | Cosmetic. |
-| Download folder | `D:\Cases\Brenner\docket` | Where named PDFs go. Created if missing. Defaults inside `%APPDATA%`. |
+| Case number | `C-01-CV-24-001234` | Type it as printed, with dashes. The app converts it to the portal's URL form (`C01cv24001234`) itself. |
+| Caption | `Smith v. Jones` | Shown in the title bar. Cosmetic. |
+| Court | `Circuit Court for Anne Arundel County` | Cosmetic. |
+| Document folder | `D:\Cases\smith-v-jones` | Where named PDFs go. **Browse…** opens a real folder picker. Leave blank for a subfolder named after the case under the folder root. |
+| Include in scheduled checks | on | Untick to keep the case but stop auto-checking it. |
 
-Click **Save settings**. The Dashboard's setup checklist now shows *Case number
-set ✓*.
+Click **Add case**. It becomes the active case, and the Dashboard shows its
+folder plus whether that folder exists yet.
+
+If you point the folder at an archive you already have, see
+[section 4](#4-importing-an-archive-you-already-have) — the app will adopt those
+files instead of downloading them again.
 
 ### Sign in
 
@@ -102,7 +109,75 @@ Opening the tab clears the New marks, so the next check's arrivals stand out.
 
 ---
 
-## 3. Notes
+## 3. Tracking several cases
+
+Add as many cases as you like in **Settings → Cases**. Each one keeps its own
+docket, documents, folder, notes, and analyses — nothing crosses over.
+
+**Switching:** use the dropdown in the top bar, or **Make active** on a case row.
+Every tab follows the active case.
+
+**Per-case settings** live on the case row: caption, court, document folder, and
+whether it's included in scheduled checks. Edit and click **Save**.
+
+**Everything else is shared** — login, email, OCR, RAG export, analysis, and
+pacing apply to all cases. One portal account, one set of preferences.
+
+**Scheduled checks** run through every case marked *Include in scheduled checks*,
+one at a time, never in parallel. That's deliberate: two cases hammering the
+portal at once is exactly what the pacing exists to prevent.
+
+**Stop tracking** forgets a case's docket, notes, and analyses. It never deletes
+downloaded PDFs — those stay in the folder, and re-adding the case plus
+[adopting the folder](#4-importing-an-archive-you-already-have) restores the
+archive.
+
+---
+
+## 4. Importing an archive you already have
+
+If the PDFs already exist, the app should not download them again. Two paths
+depending on how they're named.
+
+### Already named by this app's convention
+
+Files like `0002_20240826_Order to Docket.pdf` carry their docket sequence, which
+is all the app needs.
+
+1. Point the case's **Document folder** at that folder.
+2. Run **Check now** once so the app learns the docket and which sequence each
+   entry has.
+3. That same check adopts every matching file it finds — the toast reports
+   *"N adopted from disk"* and those documents are never re-downloaded.
+
+To adopt without checking (say you restored a backup and don't want to touch the
+portal yet), use **Dashboard → Adopt files already in this folder**. It's
+read-only with respect to the portal and safe to run repeatedly — files already
+recorded are skipped, so a second run adopts nothing.
+
+Files whose sequence matches no docket entry are reported as **orphans** and left
+completely alone.
+
+### Named the old way (`Title-caseid (2).pdf`)
+
+Those carry no sequence, so they can't be adopted directly. Run
+[the repair rename](#10-repairing-a-legacy-folder) first to give them catalog
+names, then adopt.
+
+### Resuming an interrupted harvest
+
+This needs no action at all. Every check begins by adopting what's on disk, then
+downloads only the entries still missing a file. So if a 950-document first run
+dies at document 400, the next check picks up around 400 rather than starting
+over — and the Dashboard's **Awaiting download** counter tells you how many
+entries are still outstanding.
+
+Entries the portal offers as view-only are marked as such and not retried
+forever; entries whose download genuinely failed are retried on the next check.
+
+---
+
+## 5. Notes
 
 **Notes** tab. Type, pick an entry from the dropdown (or leave it on *Case-level
 note*), and **Save note**. Notes render basic markdown — `**bold**`, `- bullets`,
@@ -114,7 +189,7 @@ to the Notes tab with that entry preselected.
 
 ---
 
-## 4. Claude analysis
+## 6. Claude analysis
 
 ### Turn it on
 
@@ -151,7 +226,7 @@ deadlines, prioritized next steps.
 
 ---
 
-## 5. Automated login with an emailed code
+## 7. Automated login with an emailed code
 
 Optional, and only worth it if you want checks to keep running unattended for
 weeks. Attach mode is simpler and safer; prefer it unless the session keeps
@@ -202,7 +277,7 @@ password field and save.
 
 ---
 
-## 6. Scheduled monitoring
+## 8. Scheduled monitoring
 
 **Settings → Monitoring**. Tick **Check the docket on a schedule** and set the
 times, 24-hour, comma separated. Default `08:00, 17:00`.
@@ -221,7 +296,7 @@ what stops the double-downloading that plagued the original script.
 
 ---
 
-## 7. OCR and RAG export
+## 9. OCR and RAG export
 
 ### OCR
 
@@ -256,7 +331,7 @@ folder.
 
 ```json
 {
-  "case_number": "C-03-CV-24-003218",
+  "case_number": "C-01-CV-24-001234",
   "entry": {"seq": 4, "file_date": "7/20/2026", "name": "Motion...", "comment": ""},
   "document": {"id": 20, "title": "Exhibit", "filename": "0004_...pdf", "sha256": "..."},
   "text": "full extracted text",
@@ -272,10 +347,10 @@ shows which documents made it out.
 
 ---
 
-## 8. Repairing a legacy folder
+## 10. Repairing a legacy folder
 
 If you already have a folder from an earlier scrape — files still named
-`Order to Docket-C03cv24003218.pdf`, `... (1).pdf`, `... (2).pdf` — this renames
+`Order to Docket-C01cv24001234.pdf`, `... (1).pdf`, `... (2).pdf` — this renames
 them into the catalog.
 
 **First run a normal check** so the app knows the docket order. Then
@@ -310,7 +385,7 @@ collision produces `~2` rather than an overwrite. Nothing is destroyed.
 
 ---
 
-## 9. Backing up
+## 11. Backing up
 
 Two things matter:
 

@@ -15,7 +15,7 @@ import pytest
 
 from mdec import config
 from mdec.portal import docket, email_code
-from mdec.pipeline import renamer
+from mdec.pipeline import adopt, renamer
 
 
 # --- fingerprint / diff ----------------------------------------------------
@@ -87,10 +87,10 @@ def test_illegal_characters_are_stripped():
 
 
 def test_stem_of_strips_case_id_and_duplicate_suffix():
-    assert renamer.stem_of("Order to Docket-C03cv24003218 (3).pdf",
-                           "C03cv24003218") == "Order to Docket"
-    assert renamer.stem_of("Order to Docket-C03cv24003218.pdf",
-                           "C03cv24003218") == "Order to Docket"
+    assert renamer.stem_of("Order to Docket-C01cv24001234 (3).pdf",
+                           "C01cv24001234") == "Order to Docket"
+    assert renamer.stem_of("Order to Docket-C01cv24001234.pdf",
+                           "C01cv24001234") == "Order to Docket"
 
 
 # --- occurrence-counted repair --------------------------------------------
@@ -112,7 +112,7 @@ def _touch(folder: Path, name: str, order: int) -> Path:
 def test_repair_maps_nth_copy_to_nth_docket_slot(dump):
     """Three files sharing a title must land in the three slots that expect it,
     in download order — never scrambled by the (1)/(2) suffix."""
-    cid = "C03cv24003218"
+    cid = "C01cv24001234"
     _touch(dump, f"Writ-{cid}.pdf", 1)
     _touch(dump, f"Writ-{cid} (1).pdf", 2)
     _touch(dump, f"Writ-{cid} (2).pdf", 3)
@@ -132,7 +132,7 @@ def test_repair_maps_nth_copy_to_nth_docket_slot(dump):
 
 
 def test_repair_actually_renames_and_writes_a_manifest(dump):
-    cid = "C03cv24003218"
+    cid = "C01cv24001234"
     _touch(dump, f"Order-{cid}.pdf", 1)
     index = [{"seq": 4, "file_date": "5/6/2024", "title": "Order"}]
     renamer.repair_folder(dump, cid, index, dry_run=False,
@@ -143,7 +143,7 @@ def test_repair_actually_renames_and_writes_a_manifest(dump):
 
 
 def test_repair_flags_extra_files_instead_of_mislabeling(dump):
-    cid = "C03cv24003218"
+    cid = "C01cv24001234"
     _touch(dump, f"Writ-{cid}.pdf", 1)
     _touch(dump, f"Writ-{cid} (1).pdf", 2)
     index = [{"seq": 10, "file_date": "1/1/2024", "title": "Writ"}]
@@ -153,7 +153,7 @@ def test_repair_flags_extra_files_instead_of_mislabeling(dump):
 
 
 def test_repair_flags_docket_slots_with_no_file(dump):
-    cid = "C03cv24003218"
+    cid = "C01cv24001234"
     _touch(dump, f"Writ-{cid}.pdf", 1)
     index = [{"seq": 10, "file_date": "1/1/2024", "title": "Writ"},
              {"seq": 11, "file_date": "2/2/2024", "title": "Writ"}]
@@ -164,7 +164,7 @@ def test_repair_flags_docket_slots_with_no_file(dump):
 
 
 def test_repair_never_overwrites_an_existing_target(dump):
-    cid = "C03cv24003218"
+    cid = "C01cv24001234"
     (dump / "0010_20240101_Writ.pdf").write_bytes(b"%PDF-1.4\nexisting")
     _touch(dump, f"Writ-{cid}.pdf", 1)
     index = [{"seq": 10, "file_date": "1/1/2024", "title": "Writ"}]
@@ -177,12 +177,12 @@ def test_repair_never_overwrites_an_existing_target(dump):
 # --- case id / url ---------------------------------------------------------
 
 def test_case_id_normalization():
-    assert config.normalize_case_id("C-03-CV-24-003218") == "C03cv24003218"
-    assert config.normalize_case_id("c03cv24003218") == "C03cv24003218"
+    assert config.normalize_case_id("C-01-CV-24-001234") == "C01cv24001234"
+    assert config.normalize_case_id("C01cv24001234") == "C01cv24001234"
 
 
 def test_case_url_contains_normalized_id():
-    assert "caseId=C03cv24003218" in config.case_url("C-03-CV-24-003218")
+    assert "caseId=C01cv24001234" in config.case_url("C-01-CV-24-001234")
 
 
 # --- email verification code ---------------------------------------------
@@ -214,7 +214,7 @@ def temp_db(monkeypatch):
 
 def test_entry_insert_is_idempotent_on_fingerprint(temp_db):
     db = temp_db
-    cid = db.upsert_case("C-03-CV-24-003218", "Caption", "Court")
+    cid = db.upsert_case("C-01-CV-24-001234", "Caption", "Court")
     e = {"seq": 1, "name": "Order", "fingerprint": "abc#0", "has_documents": True}
     first = db.insert_entry(cid, e)
     assert db.insert_entry(cid, e) == first          # re-check doesn't duplicate
@@ -223,7 +223,7 @@ def test_entry_insert_is_idempotent_on_fingerprint(temp_db):
 
 def test_known_fingerprints_round_trip(temp_db):
     db = temp_db
-    cid = db.upsert_case("C-03-CV-24-003218")
+    cid = db.upsert_case("C-01-CV-24-001234")
     for i in range(3):
         db.insert_entry(cid, {"seq": i, "name": "X", "fingerprint": f"f#{i}"})
     assert db.known_fingerprints(cid) == {"f#0", "f#1", "f#2"}
@@ -232,7 +232,7 @@ def test_known_fingerprints_round_trip(temp_db):
 
 def test_notes_and_documents_attach_to_entries(temp_db):
     db = temp_db
-    cid = db.upsert_case("C-03-CV-24-003218")
+    cid = db.upsert_case("C-01-CV-24-001234")
     eid = db.insert_entry(cid, {"seq": 1, "name": "Order", "fingerprint": "a#0"})
     did = db.insert_document(eid, "Order", "0001_x.pdf", "C:/x.pdf", "sha", 100)
     nid = db.add_note(cid, "check this", entry_id=eid)
@@ -246,7 +246,7 @@ def test_notes_and_documents_attach_to_entries(temp_db):
 
 def test_runs_record_status_and_log(temp_db):
     db = temp_db
-    cid = db.upsert_case("C-03-CV-24-003218")
+    cid = db.upsert_case("C-01-CV-24-001234")
     rid = db.start_run(cid, "check")
     db.append_run_log(rid, "opened portal")
     db.finish_run(rid, "warning", new_entries=2, new_documents=3, log="one issue")
@@ -272,3 +272,205 @@ def test_saving_settings_never_writes_a_secret_to_disk(monkeypatch):
 def test_unknown_secret_slots_are_rejected():
     with pytest.raises(ValueError):
         config.set_secret("not_a_real_slot", "x")
+
+
+def test_pre_multi_case_config_is_carried_forward(monkeypatch):
+    """An old single-case config must not lose the case or its folder."""
+    with tempfile.TemporaryDirectory() as d:
+        monkeypatch.setattr(config, "app_dir", lambda: Path(d))
+        old = {"case": {"case_number": "C-01-CV-24-001234", "caption": "Smith",
+                        "court": "Circuit"},
+               "folders": {"downloads": r"D:\Cases\smith\docket"}}
+        config.config_path().write_text(__import__("json").dumps(old),
+                                        encoding="utf-8")
+        cfg = config.load_config()
+        assert cfg["active_case_number"] == "C-01-CV-24-001234"
+        assert "case" not in cfg
+        assert cfg["_migrate_case"]["downloads"] == r"D:\Cases\smith\docket"
+        # consuming it clears the marker so it only happens once
+        assert config.consume_case_migration()["caption"] == "Smith"
+        assert config.consume_case_migration() is None
+
+
+# --- adopting files already on disk --------------------------------------
+
+def test_parse_catalog_name_recovers_the_sequence():
+    p = adopt.parse_catalog_name("0042_20240826_Order to Docket.pdf")
+    assert p["seq"] == 42 and p["description"] == "Order to Docket"
+    assert p["total_parts"] == 1
+
+
+def test_parse_catalog_name_handles_parts_unknown_dates_and_dupes():
+    assert adopt.parse_catalog_name("0555_XXXXXXXX_Exhibit_3of14.pdf") == {
+        "seq": 555, "date": "XXXXXXXX", "description": "Exhibit",
+        "part": 3, "total_parts": 14}
+    assert adopt.parse_catalog_name("0010_20240101_Writ~2.pdf")["seq"] == 10
+
+
+def test_parse_catalog_name_rejects_non_catalog_files():
+    for name in ("Order to Docket-C01cv24001234.pdf", "scan.pdf",
+                 "notes.txt", "_ORIGINAL_NAMES_manifest.csv"):
+        assert adopt.parse_catalog_name(name) is None
+
+
+def test_scan_folder_groups_by_sequence_and_ignores_strays(dump):
+    for n in ("0001_20240101_Order.pdf", "0002_20240202_Writ_1of2.pdf",
+              "0002_20240202_Writ_2of2.pdf", "random-scan.pdf",
+              "_ORIGINAL_NAMES_manifest.csv"):
+        (dump / n).write_bytes(b"%PDF-1.4\n")
+    found = adopt.scan_folder(dump)
+    assert sorted(found) == [1, 2]
+    assert len(found[2]) == 2
+    assert [f["part"] for f in found[2]] == [1, 2]      # ordered by part
+
+
+def test_scan_folder_on_a_missing_folder_is_empty():
+    assert adopt.scan_folder(Path("Z:/definitely/not/here")) == {}
+
+
+def test_adopt_links_existing_files_and_is_idempotent(temp_db, dump):
+    db = temp_db
+    cid = db.upsert_case("C-01-CV-24-001234", downloads=str(dump))
+    e1 = db.insert_entry(cid, {"seq": 1, "name": "Order", "fingerprint": "a#0",
+                               "has_documents": True})
+    db.insert_entry(cid, {"seq": 2, "name": "Writ", "fingerprint": "b#0",
+                          "has_documents": True})
+    (dump / "0001_20240101_Order.pdf").write_bytes(b"%PDF-1.4\norder")
+    (dump / "0002_20240202_Writ.pdf").write_bytes(b"%PDF-1.4\nwrit")
+
+    first = adopt.adopt_folder(db, cid, dump)
+    assert first["adopted"] == 2 and first["entries"] == 2
+    assert len(db.list_documents(cid)) == 2
+
+    again = adopt.adopt_folder(db, cid, dump)
+    assert again["adopted"] == 0            # nothing re-adopted
+    assert len(db.list_documents(cid)) == 2
+
+    doc = [d for d in db.list_documents(cid) if d["entry_id"] == e1][0]
+    assert doc["size_bytes"] == len(b"%PDF-1.4\norder")
+    assert doc["sha256"]
+
+
+def test_adopt_reports_files_with_no_matching_entry(temp_db, dump):
+    db = temp_db
+    cid = db.upsert_case("C-01-CV-24-001234", downloads=str(dump))
+    db.insert_entry(cid, {"seq": 1, "name": "Order", "fingerprint": "a#0",
+                          "has_documents": True})
+    (dump / "0001_20240101_Order.pdf").write_bytes(b"%PDF-1.4\n")
+    (dump / "0099_20250101_Mystery.pdf").write_bytes(b"%PDF-1.4\n")
+    r = adopt.adopt_folder(db, cid, dump)
+    assert r["adopted"] == 1
+    assert r["orphan_count"] == 1 and "0099_20250101_Mystery.pdf" in r["orphans"]
+
+
+def test_adopt_skips_zero_byte_files(temp_db, dump):
+    """A zero-byte file is a failed download, not a document."""
+    db = temp_db
+    cid = db.upsert_case("C-01-CV-24-001234", downloads=str(dump))
+    db.insert_entry(cid, {"seq": 1, "name": "Order", "fingerprint": "a#0",
+                          "has_documents": True})
+    (dump / "0001_20240101_Order.pdf").write_bytes(b"")
+    assert adopt.adopt_folder(db, cid, dump)["adopted"] == 0
+
+
+def test_adopt_marks_the_entry_satisfied(temp_db, dump):
+    db = temp_db
+    cid = db.upsert_case("C-01-CV-24-001234", downloads=str(dump))
+    db.insert_entry(cid, {"seq": 1, "name": "Order", "fingerprint": "a#0",
+                          "has_documents": True})
+    assert len(db.entries_missing_documents(cid)) == 1
+    (dump / "0001_20240101_Order.pdf").write_bytes(b"%PDF-1.4\n")
+    adopt.adopt_folder(db, cid, dump)
+    assert db.entries_missing_documents(cid) == []
+
+
+# --- resume / gap tracking ------------------------------------------------
+
+def test_view_only_entries_are_not_retried_forever(temp_db):
+    db = temp_db
+    cid = db.upsert_case("C-01-CV-24-001234")
+    eid = db.insert_entry(cid, {"seq": 1, "name": "Hearing", "fingerprint": "a#0",
+                                "has_documents": True})
+    assert len(db.entries_missing_documents(cid)) == 1
+    db.set_entry_doc_status(eid, "view_only")
+    assert db.entries_missing_documents(cid) == []
+
+
+def test_failed_downloads_are_retried(temp_db):
+    db = temp_db
+    cid = db.upsert_case("C-01-CV-24-001234")
+    eid = db.insert_entry(cid, {"seq": 1, "name": "Order", "fingerprint": "a#0",
+                                "has_documents": True})
+    db.set_entry_doc_status(eid, "error")
+    assert len(db.entries_missing_documents(cid)) == 1
+
+
+def test_entries_without_documents_are_not_chased(temp_db):
+    """A docket entry with no Document button should never be a download gap."""
+    db = temp_db
+    cid = db.upsert_case("C-01-CV-24-001234")
+    db.insert_entry(cid, {"seq": 1, "name": "Text-only entry",
+                          "fingerprint": "a#0", "has_documents": False})
+    assert db.entries_missing_documents(cid) == []
+
+
+# --- multiple cases -------------------------------------------------------
+
+def test_cases_are_isolated_from_each_other(temp_db):
+    db = temp_db
+    a = db.upsert_case("C-01-CV-24-001111", "Case A", downloads="A:/a")
+    b = db.upsert_case("C-02-CV-24-002222", "Case B", downloads="B:/b")
+    db.insert_entry(a, {"seq": 1, "name": "Order A", "fingerprint": "x#0"})
+    db.insert_entry(b, {"seq": 1, "name": "Order B", "fingerprint": "x#0"})
+    db.add_note(a, "note for A")
+    assert len(db.list_entries(a)) == 1
+    assert db.list_entries(a)[0]["name"] == "Order A"
+    assert len(db.list_notes(b)) == 0
+    # the same fingerprint in two cases is fine — uniqueness is per case
+    assert db.known_fingerprints(a) == db.known_fingerprints(b) == {"x#0"}
+
+
+def test_list_cases_reports_counts(temp_db):
+    db = temp_db
+    a = db.upsert_case("C-01-CV-24-001111", "Case A")
+    db.upsert_case("C-02-CV-24-002222", "Case B")
+    eid = db.insert_entry(a, {"seq": 1, "name": "Order", "fingerprint": "x#0"})
+    db.insert_document(eid, "Order", "0001_x.pdf", "C:/x.pdf", "sha", 10)
+    rows = {c["case_number"]: c for c in db.list_cases()}
+    assert rows["C-01-CV-24-001111"]["entry_count"] == 1
+    assert rows["C-01-CV-24-001111"]["doc_count"] == 1
+    assert rows["C-02-CV-24-002222"]["entry_count"] == 0
+
+
+def test_deleting_a_case_removes_only_its_data(temp_db):
+    db = temp_db
+    a = db.upsert_case("C-01-CV-24-001111")
+    b = db.upsert_case("C-02-CV-24-002222")
+    ea = db.insert_entry(a, {"seq": 1, "name": "A", "fingerprint": "x#0"})
+    db.insert_document(ea, "A", "a.pdf", "C:/a.pdf", "sha", 10)
+    db.add_note(a, "note A")
+    db.insert_entry(b, {"seq": 1, "name": "B", "fingerprint": "y#0"})
+    db.add_note(b, "note B")
+
+    db.delete_case(a)
+    assert db.get_case("C-01-CV-24-001111") is None
+    assert db.list_entries(a) == [] and db.list_documents(a) == []
+    assert db.list_notes(a) == []
+    assert len(db.list_entries(b)) == 1 and len(db.list_notes(b)) == 1
+
+
+def test_case_folder_defaults_to_a_subfolder_per_case(monkeypatch):
+    with tempfile.TemporaryDirectory() as d:
+        monkeypatch.setattr(config, "app_dir", lambda: Path(d))
+        cfg = config.load_config()
+        cfg["folders"]["downloads_root"] = r"D:\Cases"
+        folder = config.default_case_folder("C-01-CV-24-001234", cfg)
+        assert folder == str(Path(r"D:\Cases") / "C01cv24001234")
+
+
+def test_updating_a_case_folder_sticks(temp_db):
+    db = temp_db
+    cid = db.upsert_case("C-01-CV-24-001234", downloads="A:/old")
+    db.update_case(cid, downloads="B:/new", monitor_enabled=0)
+    case = db.get_case_by_id(cid)
+    assert case["downloads"] == "B:/new" and case["monitor_enabled"] == 0

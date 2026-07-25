@@ -35,7 +35,7 @@ The server hadn't finished starting. Reload. If it persists, run with
 ### "Portal session expired" on every check
 Attach mode lost the session. Click **Open portal window**, sign in, then check
 again. If it expires constantly, consider managed login
-([walkthrough](WALKTHROUGH.md#5-automated-login-with-an-emailed-code)).
+([walkthrough](WALKTHROUGH.md#7-automated-login-with-an-emailed-code)).
 
 ### "Managed login completed but the case page still looks logged out"
 The credentials submitted but the portal didn't accept them, or a selector is
@@ -142,9 +142,10 @@ unknown rather than guessing, and `XXXXXXXX` sorts predictably. Fill it in by
 hand if you know the date.
 
 ### Repair dry run shows everything `unmatched`
-Almost always the case ID. The app strips `-C03cv24003218` from filenames using
-the normalized form of your configured case number. Check that **Settings → Case
-number** matches the case ID actually in the filenames.
+Almost always the case ID. The app strips `-C01cv24001234` from filenames using
+the normalized form of the active case's number. Check that the case number in
+**Settings → Cases** matches the case ID actually in the filenames — and that the
+case you mean is the active one.
 
 Also make sure you've run a real check first — without a docket index there's
 nothing to match against.
@@ -161,6 +162,66 @@ from Explorer's address bar.
 ### I want to undo a rename
 `_ORIGINAL_NAMES_manifest.csv` in the folder maps every original name to its
 final name, in order. The app never overwrites: a collision becomes `~2`.
+
+---
+
+## Adopting files already on disk
+
+### "Adopt files" found nothing, but the folder is full of PDFs
+Adoption matches on the sequence number in the filename, so only
+`NNNN_YYYYMMDD_…` names can be adopted. Legacy `Title-caseid (2).pdf` names carry
+no sequence — run the repair rename first, then adopt.
+
+Also check the case's **Document folder** actually points at that folder
+(Dashboard shows the resolved path), and that the right case is active.
+
+### "No docket entries recorded yet"
+Adoption links files to entries, so the app needs the docket first. Run **Check
+now** once. If you don't want it downloading yet, note that the check adopts
+before downloading — so on a complete folder there'll be little or nothing left
+to fetch.
+
+### Everything came back as an orphan
+The sequence numbers in the filenames don't match the docket the app read. Usual
+cause: the files were numbered against a different case, or a previous repair run
+used a different docket order. Compare a filename's `NNNN` against that entry's
+sequence on the Docket tab.
+
+### It re-downloaded documents I already had
+The files weren't adoptable — wrong folder, non-catalog names, or zero-byte files
+(treated as failed downloads, deliberately). The duplicates are safe: the app
+never overwrites, so you'll have a `~2` copy rather than a lost original.
+
+### "Awaiting download" never reaches zero
+Those entries have a document button but no file. Each check retries them. If a
+number sticks:
+
+- **Activity** will show them as `view_only` — the portal offers no download, and
+  they're excluded from future retries once marked.
+- Or the warning says no download button was found for them on this page, which
+  means the entry didn't render in the section the parser read. They're retried
+  next check.
+
+---
+
+## Multiple cases
+
+### The wrong case's data is showing
+Check the case dropdown in the top bar. Every tab follows the active case.
+
+### A case disappeared from the list
+"Stop tracking" removes it. Its PDFs are still in the folder — re-add the case
+with the same number and folder, run a check, and adopt the folder to restore the
+archive. Notes and analyses can't be recovered.
+
+### Scheduled checks skip a case
+Its **Include in scheduled checks** box is unticked (Settings → Cases). Manual
+**Check now** always runs the active case regardless.
+
+### Two cases share a folder
+Not recommended but not broken: each case adopts only files whose sequence
+matches one of *its* entries, and reports the rest as orphans. Give each case its
+own folder to avoid the noise.
 
 ---
 

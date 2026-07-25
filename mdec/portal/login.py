@@ -26,23 +26,23 @@ class LoginFailed(Exception):
     pass
 
 
-async def ensure_logged_in(cfg: dict, log=print) -> None:
+async def ensure_logged_in(cfg: dict, case_number: str, log=print) -> None:
     """Make sure the persistent session can see the case page. Raises otherwise."""
     page = await br.browser.page()
-    ok = await br.goto_case(page, cfg["case"]["case_number"])
+    ok = await br.goto_case(page, case_number)
     if ok:
         return
     if cfg["login"]["mode"] != "managed":
         raise br.NotLoggedIn(
-            "Portal session expired. Open the portal window from the app and log "
-            "in manually (attach mode), or switch to managed login in Settings."
+            "Portal session expired. Click \"Open portal window\" and sign in "
+            "(attach mode), or switch to managed login in Settings."
         )
     log("Session expired — attempting managed login")
     await _managed_login(page, cfg, log)
-    ok = await br.goto_case(page, cfg["case"]["case_number"])
+    ok = await br.goto_case(page, case_number)
     if not ok:
         raise LoginFailed("Managed login completed but the case page still "
-                          "looks logged out. Check selectors in Settings.")
+                          "looks signed out. Check the selectors in Settings.")
 
 
 async def _managed_login(page, cfg: dict, log=print) -> None:

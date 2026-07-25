@@ -410,6 +410,64 @@ main { padding: var(--gut) 1.5rem 4rem; max-width: 1500px; }
 .repair-out .r-unmatched { color: var(--amber); }
 .repair-out .r-missing { color: var(--stamp); }
 
+/* --- multi-case ---------------------------------------------------------- */
+
+.sr-only {
+  position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px;
+  overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0;
+}
+.case-switch {
+  width: auto; max-width: 22rem;
+  font-family: var(--display); font-size: 0.85rem; letter-spacing: 0.02em;
+}
+
+.case-list { display: grid; gap: 1px; background: var(--rule);
+  border: 1px solid var(--rule); border-radius: var(--radius); }
+.case-row {
+  background: var(--paper-2); padding: 0.7rem 0.9rem;
+  display: grid; gap: 0.5rem;
+}
+.case-row.is-active { border-left: 3px solid var(--stamp); }
+.case-row-head {
+  display: flex; align-items: baseline; gap: 0.6rem; flex-wrap: wrap;
+}
+.case-row-num {
+  font-family: var(--mono); font-size: 0.85rem; font-variant-numeric: tabular-nums;
+}
+.case-row.is-active .case-row-num { color: var(--stamp); }
+.case-row-caption {
+  font-family: var(--display); font-size: 0.95rem; flex: 1 1 12rem;
+}
+.case-row-fields { display: grid; gap: 0.5rem; }
+.case-row-fields label {
+  display: grid; gap: 0.25rem;
+  font-family: var(--display); font-size: 0.75rem; letter-spacing: 0.04em;
+  text-transform: uppercase; color: var(--rail);
+}
+.case-row-fields label.check {
+  display: flex; text-transform: none; letter-spacing: 0.02em;
+  font-size: 0.82rem; color: var(--ink);
+}
+.case-row-tools { display: flex; gap: 0.5rem; flex-wrap: wrap; }
+
+.folder-picker { display: flex; gap: 0.4rem; align-items: stretch; }
+.folder-picker .input { flex: 1 1 auto; }
+.folder-picker .btn { flex: none; }
+
+.folder-line {
+  display: flex; align-items: center; gap: 0.6rem; flex-wrap: wrap;
+  margin: 0 0 0.8rem;
+}
+.folder-line code {
+  font-family: var(--mono); font-size: 0.8rem; word-break: break-all;
+  background: var(--paper-sunk); padding: 0.2rem 0.4rem;
+}
+
+@media (max-width: 780px) {
+  .case-switch { max-width: 12rem; }
+  .topbar { gap: 0.6rem; }
+}
+
 @media (prefers-reduced-motion: reduce) {
   * { animation-duration: 0.01ms !important; transition-duration: 0.01ms !important; }
 }

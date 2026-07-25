@@ -23,6 +23,8 @@ CREATE TABLE IF NOT EXISTS cases (
     case_number TEXT NOT NULL UNIQUE,
     caption TEXT DEFAULT '',
     court TEXT DEFAULT '',
+    downloads TEXT DEFAULT '',
+    monitor_enabled INTEGER DEFAULT 1,
     created_at TEXT NOT NULL
 );
 CREATE TABLE IF NOT EXISTS entries (
@@ -36,6 +38,7 @@ CREATE TABLE IF NOT EXISTS entries (
     raw_text TEXT DEFAULT '',
     fingerprint TEXT NOT NULL,
     has_documents INTEGER DEFAULT 0,
+    doc_status TEXT DEFAULT 'pending',
     first_seen TEXT NOT NULL,
     UNIQUE(case_id, fingerprint)
 );
@@ -94,11 +97,28 @@ def now() -> str:
     return datetime.now(timezone.utc).isoformat(timespec="seconds")
 
 
+# Columns added after the first release. CREATE TABLE IF NOT EXISTS won't add
+# them to an existing database, so they're applied by ALTER on every connect.
+_ADDED_COLUMNS = (
+    ("cases", "downloads", "TEXT DEFAULT ''"),
+    ("cases", "monitor_enabled", "INTEGER DEFAULT 1"),
+    ("entries", "doc_status", "TEXT DEFAULT 'pending'"),
+)
+
+
+def _migrate(c: sqlite3.Connection) -> None:
+    for table, column, decl in _ADDED_COLUMNS:
+        cols = {r[1] for r in c.execute(f"PRAGMA table_info({table})")}
+        if column not in cols:
+            c.execute(f"ALTER TABLE {table} ADD COLUMN {column} {decl}")
+
+
 @contextmanager
 def conn():
     c = sqlite3.connect(db_path())
     c.row_factory = sqlite3.Row
     c.executescript(SCHEMA)
+    _migrate(c)
     try:
         yield c
         c.commit()
@@ -112,20 +132,24 @@ def _rows(cur) -> list[dict]:
 
 # --- cases -----------------------------------------------------------------
 
-def upsert_case(case_number: str, caption: str = "", court: str = "") -> int:
+def upsert_case(case_number: str, caption: str = "", court: str = "",
+                downloads: str = "") -> int:
+    """Create or update a case. Empty strings leave existing values alone."""
     with conn() as c:
         cur = c.execute("SELECT id FROM cases WHERE case_number=?", (case_number,))
         row = cur.fetchone()
         if row:
             c.execute(
                 "UPDATE cases SET caption=COALESCE(NULLIF(?,''),caption),"
-                " court=COALESCE(NULLIF(?,''),court) WHERE id=?",
-                (caption, court, row["id"]),
+                " court=COALESCE(NULLIF(?,''),court),"
+                " downloads=COALESCE(NULLIF(?,''),downloads) WHERE id=?",
+                (caption, court, downloads, row["id"]),
             )
             return row["id"]
         cur = c.execute(
-            "INSERT INTO cases (case_number, caption, court, created_at) VALUES (?,?,?,?)",
-            (case_number, caption, court, now()),
+            "INSERT INTO cases (case_number, caption, court, downloads, created_at)"
+            " VALUES (?,?,?,?,?)",
+            (case_number, caption, court, downloads, now()),
         )
         return cur.lastrowid
 
@@ -135,6 +159,47 @@ def get_case(case_number: str) -> dict | None:
         cur = c.execute("SELECT * FROM cases WHERE case_number=?", (case_number,))
         row = cur.fetchone()
         return dict(row) if row else None
+
+
+def get_case_by_id(case_id: int) -> dict | None:
+    with conn() as c:
+        cur = c.execute("SELECT * FROM cases WHERE id=?", (case_id,))
+        row = cur.fetchone()
+        return dict(row) if row else None
+
+
+def list_cases() -> list[dict]:
+    """Every tracked case with its counts, for the case switcher."""
+    with conn() as c:
+        cur = c.execute(
+            "SELECT c.*, "
+            " (SELECT COUNT(*) FROM entries e WHERE e.case_id=c.id) AS entry_count,"
+            " (SELECT COUNT(*) FROM documents d JOIN entries e ON e.id=d.entry_id"
+            "   WHERE e.case_id=c.id) AS doc_count "
+            "FROM cases c ORDER BY c.case_number")
+        return _rows(cur)
+
+
+def update_case(case_id: int, **fields) -> None:
+    allowed = {"caption", "court", "downloads", "monitor_enabled"}
+    sets = {k: v for k, v in fields.items() if k in allowed}
+    if not sets:
+        return
+    with conn() as c:
+        q = ", ".join(f"{k}=?" for k in sets)
+        c.execute(f"UPDATE cases SET {q} WHERE id=?", (*sets.values(), case_id))
+
+
+def delete_case(case_id: int) -> None:
+    """Forget a case and everything recorded about it. Files on disk stay."""
+    with conn() as c:
+        c.execute("DELETE FROM documents WHERE entry_id IN "
+                  "(SELECT id FROM entries WHERE case_id=?)", (case_id,))
+        c.execute("DELETE FROM notes WHERE case_id=?", (case_id,))
+        c.execute("DELETE FROM analyses WHERE case_id=?", (case_id,))
+        c.execute("DELETE FROM entries WHERE case_id=?", (case_id,))
+        c.execute("DELETE FROM runs WHERE case_id=?", (case_id,))
+        c.execute("DELETE FROM cases WHERE id=?", (case_id,))
 
 
 # --- entries ---------------------------------------------------------------
@@ -176,6 +241,27 @@ def list_entries(case_id: int) -> list[dict]:
         return _rows(cur)
 
 
+def set_entry_doc_status(entry_id: int, status: str) -> None:
+    """'pending' | 'ok' | 'view_only' | 'error' — drives gap-filling."""
+    with conn() as c:
+        c.execute("UPDATE entries SET doc_status=? WHERE id=?", (status, entry_id))
+
+
+def entries_missing_documents(case_id: int) -> list[dict]:
+    """Entries that should have a file but don't yet — the resume work list.
+
+    Excludes 'view_only' (the portal offers no download) so a check doesn't
+    retry them forever, and 'ok' (already satisfied).
+    """
+    with conn() as c:
+        cur = c.execute(
+            "SELECT e.* FROM entries e WHERE e.case_id=? AND e.has_documents=1 "
+            "AND COALESCE(e.doc_status,'pending') IN ('pending','error') "
+            "AND NOT EXISTS (SELECT 1 FROM documents d WHERE d.entry_id=e.id) "
+            "ORDER BY e.seq", (case_id,))
+        return _rows(cur)
+
+
 # --- documents -------------------------------------------------------------
 
 def insert_document(entry_id: int, title: str, filename: str, path: str,
@@ -214,6 +300,15 @@ def get_document(doc_id: int) -> dict | None:
         cur = c.execute("SELECT * FROM documents WHERE id=?", (doc_id,))
         row = cur.fetchone()
         return dict(row) if row else None
+
+
+def known_paths(case_id: int) -> set[str]:
+    """Absolute paths already recorded, so adopting a folder twice is a no-op."""
+    with conn() as c:
+        cur = c.execute(
+            "SELECT d.path FROM documents d JOIN entries e ON e.id=d.entry_id "
+            "WHERE e.case_id=?", (case_id,))
+        return {str(r["path"]).lower() for r in cur.fetchall()}
 
 
 def max_seq(case_id: int) -> int:

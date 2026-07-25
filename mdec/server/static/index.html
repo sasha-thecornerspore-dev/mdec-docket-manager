@@ -12,11 +12,13 @@
     <span class="brand-mark" aria-hidden="true">§</span>
     <div class="brand-text">
       <h1 id="caseCaption">MDEC Docket Manager</h1>
-      <p class="case-line"><span id="caseNumber">No case configured</span><span
+      <p class="case-line"><span id="caseNumber">No case yet</span><span
          class="sep" aria-hidden="true">/</span><span id="caseCourt"></span></p>
     </div>
   </div>
   <div class="topbar-actions">
+    <label class="sr-only" for="caseSwitch">Active case</label>
+    <select id="caseSwitch" class="input case-switch"></select>
     <span id="monitorState" class="state" title="Monitor state">idle</span>
     <button id="btnCheck" class="btn btn-primary">Check now</button>
     <button id="btnPortal" class="btn">Open portal window</button>
@@ -55,8 +57,17 @@
       </div>
     </div>
     <div class="card">
-      <h2 class="card-title">Latest filings</h2>
-      <div id="dashLatest" class="ledger"></div>
+      <h2 class="card-title">Document folder</h2>
+      <p class="folder-line"><code id="dashFolder">—</code>
+        <span id="dashFolderState" class="chip"></span></p>
+      <div class="toolbar">
+        <button id="btnAdopt" class="btn">Adopt files already in this folder</button>
+      </div>
+      <p class="hint">Use this after restoring a backup or rebuilding the
+        database: the app links the PDFs already on disk to their docket entries
+        instead of downloading them again. Checks do this automatically too —
+        an interrupted harvest resumes rather than starting over.</p>
+      <div id="adoptOut" class="repair-out"></div>
     </div>
   </section>
 
@@ -120,21 +131,47 @@
 
   <!-- SETTINGS ------------------------------------------------------- -->
   <section class="panel" id="panel-settings" role="tabpanel">
+    <div class="card">
+      <h2 class="card-title">Cases</h2>
+      <div id="caseList" class="case-list"></div>
+      <h3 class="subhead">Add a case</h3>
+      <div class="fields">
+        <label>Case number
+          <input class="input" id="newCaseNumber" placeholder="C-01-CV-24-001234">
+          <span class="hint">As printed on the docket, with dashes. The app
+            converts it to the portal's URL form itself.</span></label>
+        <label>Caption <input class="input" id="newCaseCaption"
+               placeholder="Smith v. Jones"></label>
+        <label>Court <input class="input" id="newCaseCourt"
+               placeholder="Circuit Court for Anne Arundel County"></label>
+        <label>Document folder
+          <span class="folder-picker">
+            <input class="input" id="newCaseFolder"
+                   placeholder="leave blank to use the default">
+            <button type="button" class="btn" data-browse="newCaseFolder">Browse…</button>
+          </span>
+          <span class="hint">Defaults to a subfolder named after the case under
+            the folder root below. Point it at an existing archive and the app
+            will adopt what's already there.</span></label>
+        <label class="check"><input type="checkbox" id="newCaseMonitor" checked>
+          Include in scheduled checks</label>
+      </div>
+      <div class="toolbar">
+        <button type="button" id="btnAddCase" class="btn btn-primary">Add case</button>
+      </div>
+    </div>
+
     <form id="settingsForm" autocomplete="off">
       <div class="card">
-        <h2 class="card-title">Case</h2>
+        <h2 class="card-title">Folders</h2>
         <div class="fields">
-          <label>Case number
-            <input class="input" name="case.case_number"
-                   placeholder="C-03-CV-24-003218"></label>
-          <label>Caption
-            <input class="input" name="case.caption"
-                   placeholder="Brenner et al. vs. Schatz"></label>
-          <label>Court
-            <input class="input" name="case.court"
-                   placeholder="Baltimore County Circuit Court"></label>
-          <label>Download folder
-            <input class="input" name="folders.downloads"></label>
+          <label>Folder root for new cases
+            <span class="folder-picker">
+              <input class="input" name="folders.downloads_root">
+              <button type="button" class="btn" data-browse-name="folders.downloads_root">Browse…</button>
+            </span>
+            <span class="hint">Each new case gets its own subfolder here. Existing
+              cases keep whatever folder they were given.</span></label>
         </div>
       </div>
 
@@ -142,7 +179,7 @@
         <h2 class="card-title">Monitoring</h2>
         <div class="fields">
           <label class="check"><input type="checkbox" name="schedule.enabled">
-            Check the docket on a schedule</label>
+            Check on a schedule (every case marked "monitored" above)</label>
           <label>Check times (24h, comma separated)
             <input class="input" name="schedule.times" placeholder="08:00, 17:00">
             <span class="hint">Twice a day is deliberate. The portal throttles
@@ -262,10 +299,15 @@
       <p class="hint">Renames an old dump folder (files still named
         <code>Title-caseid (2).pdf</code>) into the
         <code>NNNN_YYYYMMDD_Description.pdf</code> catalog, matching the Nth copy
-        of a title to the Nth docket slot expecting it. Always dry-run first.
-        Sorted by file creation time, which equals download order.</p>
+        of a title to the Nth docket slot expecting it. Sorted by file creation
+        time, which equals download order. Always dry-run first. Once names carry
+        sequence numbers, "Adopt files" on the Dashboard can link them.</p>
       <div class="toolbar">
-        <input id="repairFolder" class="input" placeholder="D:\path\to\docket">
+        <span class="folder-picker">
+          <input id="repairFolder" class="input"
+                 placeholder="leave blank to use this case's folder">
+          <button type="button" class="btn" data-browse="repairFolder">Browse…</button>
+        </span>
         <button id="btnRepairDry" class="btn">Dry run</button>
         <button id="btnRepairGo" class="btn btn-danger">Rename for real</button>
       </div>

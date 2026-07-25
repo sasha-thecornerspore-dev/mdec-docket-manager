@@ -7,6 +7,7 @@ returns a secret value — only booleans saying which slots are set.
 
 from __future__ import annotations
 
+import asyncio
 import json
 from pathlib import Path
 
@@ -27,6 +28,11 @@ app = FastAPI(title="MDEC Docket Manager", version=__version__)
 
 @app.on_event("startup")
 async def _startup() -> None:
+    # Adopt a pre-multi-case config into the cases table, once.
+    pending = config.consume_case_migration()
+    if pending:
+        db.upsert_case(pending["case_number"], pending.get("caption", ""),
+                       pending.get("court", ""), pending.get("downloads", ""))
     monitor.start_scheduler()
 
 
@@ -35,17 +41,28 @@ async def _shutdown() -> None:
     await monitor.stop()
 
 
-def _case_row() -> dict:
+def _active_case() -> dict:
+    """The case the UI is looking at. 400s with an actionable message if none."""
+    number = config.load_config()["active_case_number"]
+    case = db.get_case(number) if number else None
+    if case:
+        return case
+    cases = db.list_cases()
+    if cases:                       # config drifted — fall back to the first case
+        _set_active(cases[0]["case_number"])
+        return cases[0]
+    raise HTTPException(400, "No case yet. Add one in Settings → Cases.")
+
+
+def _set_active(case_number: str) -> None:
     cfg = config.load_config()
-    number = cfg["case"]["case_number"]
-    if not number:
-        raise HTTPException(400, "No case configured. Open Settings first.")
-    case = db.get_case(number)
-    if not case:
-        case = {"id": db.upsert_case(number, cfg["case"]["caption"],
-                                    cfg["case"]["court"]),
-                "case_number": number}
-    return case
+    cfg["active_case_number"] = case_number
+    config.save_config(cfg)
+
+
+def _case_folder(case: dict) -> Path:
+    return Path(case.get("downloads") or
+                config.default_case_folder(case["case_number"]))
 
 
 # --- status / dashboard ----------------------------------------------------
@@ -53,8 +70,12 @@ def _case_row() -> dict:
 @app.get("/api/status")
 async def api_status():
     cfg = config.load_config()
-    number = cfg["case"]["case_number"]
+    cases = db.list_cases()
+    number = cfg["active_case_number"]
     case = db.get_case(number) if number else None
+    if not case and cases:
+        case = cases[0]
+        _set_active(case["case_number"])
     entries = db.list_entries(case["id"]) if case else []
     docs = db.list_documents(case["id"]) if case else []
     ocr_ok, ocr_why = ocr.available()
@@ -63,13 +84,18 @@ async def api_status():
         analysis_backend, analysis_why = backend, ""
     except analyzer.AnalyzerNotConfigured as exc:
         analysis_backend, analysis_why = "none", str(exc)
+    folder = _case_folder(case) if case else None
     return {
         "version": __version__,
-        "case": cfg["case"],
+        "cases": cases,
+        "case": case or {},
+        "case_folder": str(folder) if folder else "",
+        "case_folder_exists": bool(folder and folder.is_dir()),
         "case_url": config.case_url(number) if number else "",
         "counts": {
             "entries": len(entries),
             "documents": len(docs),
+            "missing": len(db.entries_missing_documents(case["id"])) if case else 0,
             "ocr_done": sum(1 for d in docs if d["ocr_done"]),
             "rag_exported": sum(1 for d in docs if d["rag_exported"]),
             "notes": len(db.list_notes(case["id"])) if case else 0,
@@ -97,7 +123,7 @@ async def api_status():
 
 @app.get("/api/entries")
 async def api_entries():
-    case = _case_row()
+    case = _active_case()
     entries = db.list_entries(case["id"])
     docs = db.list_documents(case["id"])
     by_entry: dict[int, list] = {}
@@ -110,7 +136,7 @@ async def api_entries():
 
 @app.get("/api/documents")
 async def api_documents():
-    return {"documents": db.list_documents(_case_row()["id"])}
+    return {"documents": db.list_documents(_active_case()["id"])}
 
 
 @app.get("/api/documents/{doc_id}/file")
@@ -147,14 +173,14 @@ class NoteIn(BaseModel):
 
 @app.get("/api/notes")
 async def api_notes(entry_id: int | None = None):
-    return {"notes": db.list_notes(_case_row()["id"], entry_id)}
+    return {"notes": db.list_notes(_active_case()["id"], entry_id)}
 
 
 @app.post("/api/notes")
 async def api_add_note(note: NoteIn):
     if not note.body.strip():
         raise HTTPException(400, "Note body is empty.")
-    nid = db.add_note(_case_row()["id"], note.body, note.entry_id,
+    nid = db.add_note(_active_case()["id"], note.body, note.entry_id,
                       note.document_id)
     return {"ok": True, "id": nid}
 
@@ -175,7 +201,7 @@ async def api_delete_note(note_id: int):
 
 @app.get("/api/analyses")
 async def api_analyses(entry_id: int | None = None):
-    rows = db.list_analyses(_case_row()["id"], entry_id)
+    rows = db.list_analyses(_active_case()["id"], entry_id)
     for r in rows:
         try:
             r["deadlines"] = json.loads(r["deadlines"] or "[]")
@@ -211,10 +237,73 @@ async def api_save_settings(payload: dict):
 
     merge(cfg, payload)
     config.save_config(cfg)
-    if cfg["case"]["case_number"]:
-        db.upsert_case(cfg["case"]["case_number"], cfg["case"]["caption"],
-                       cfg["case"]["court"])
     return {"ok": True, "settings": config.load_config()}
+
+
+# --- cases -----------------------------------------------------------------
+
+class CaseIn(BaseModel):
+    case_number: str
+    caption: str = ""
+    court: str = ""
+    downloads: str = ""
+    monitor_enabled: bool = True
+
+
+@app.get("/api/cases")
+async def api_list_cases():
+    cases = db.list_cases()
+    for c in cases:
+        c["resolved_folder"] = str(_case_folder(c))
+    return {"cases": cases,
+            "active": config.load_config()["active_case_number"]}
+
+
+@app.post("/api/cases")
+async def api_add_case(c: CaseIn):
+    number = c.case_number.strip()
+    if not config.normalize_case_id(number):
+        raise HTTPException(400, "Enter a case number, e.g. C-01-CV-24-001234.")
+    if db.get_case(number):
+        raise HTTPException(400, f"{number} is already being tracked.")
+    folder = c.downloads.strip() or config.default_case_folder(number)
+    case_id = db.upsert_case(number, c.caption.strip(), c.court.strip(), folder)
+    db.update_case(case_id, monitor_enabled=int(c.monitor_enabled))
+    _set_active(number)             # a freshly added case becomes the active one
+    return {"ok": True, "id": case_id, "folder": folder}
+
+
+@app.put("/api/cases/{case_id}")
+async def api_update_case(case_id: int, c: CaseIn):
+    if not db.get_case_by_id(case_id):
+        raise HTTPException(404, "No such case.")
+    db.update_case(case_id, caption=c.caption.strip(), court=c.court.strip(),
+                   downloads=c.downloads.strip(),
+                   monitor_enabled=int(c.monitor_enabled))
+    return {"ok": True}
+
+
+@app.post("/api/cases/{case_id}/activate")
+async def api_activate_case(case_id: int):
+    case = db.get_case_by_id(case_id)
+    if not case:
+        raise HTTPException(404, "No such case.")
+    _set_active(case["case_number"])
+    return {"ok": True, "case": case}
+
+
+@app.delete("/api/cases/{case_id}")
+async def api_delete_case(case_id: int):
+    """Forget a case. Downloaded files are never touched."""
+    case = db.get_case_by_id(case_id)
+    if not case:
+        raise HTTPException(404, "No such case.")
+    db.delete_case(case_id)
+    remaining = db.list_cases()
+    _set_active(remaining[0]["case_number"] if remaining else "")
+    return {"ok": True, "message":
+            f"Stopped tracking {case['case_number']}. Files in "
+            f"{case.get('downloads') or 'its folder'} were left alone."}
 
 
 class SecretIn(BaseModel):
@@ -247,8 +336,49 @@ async def api_open_portal():
 
 
 @app.post("/api/actions/check-now")
-async def api_check_now():
-    return await monitor.run_check("manual")
+async def api_check_now(case_id: int | None = None):
+    return await monitor.run_check("manual", case_id)
+
+
+@app.post("/api/actions/check-all")
+async def api_check_all():
+    return await monitor.run_all_cases()
+
+
+@app.post("/api/actions/adopt")
+async def api_adopt(case_id: int | None = None):
+    """Link files already in the folder to docket entries instead of
+    re-downloading them."""
+    return await monitor.adopt_now(case_id)
+
+
+@app.post("/api/actions/pick-folder")
+async def api_pick_folder(payload: dict | None = None):
+    """Open the OS folder picker. Server and browser are the same machine, so
+    this is the only way a web UI can offer a real directory chooser."""
+    initial = (payload or {}).get("initial") or ""
+    try:
+        path = await asyncio.get_running_loop().run_in_executor(
+            None, _ask_directory, initial)
+    except Exception as exc:
+        raise HTTPException(500, f"Could not open the folder picker ({exc}). "
+                                 f"Type the path instead.")
+    return {"ok": True, "path": path or ""}
+
+
+def _ask_directory(initial: str) -> str:
+    """Blocking native directory dialog via tkinter (stdlib)."""
+    import tkinter
+    from tkinter import filedialog
+    root = tkinter.Tk()
+    try:
+        root.withdraw()
+        root.attributes("-topmost", True)
+        return filedialog.askdirectory(
+            title="Choose the folder for this case's documents",
+            initialdir=initial or str(Path.home()), mustexist=False) or ""
+    finally:
+        root.destroy()
 
 
 @app.post("/api/actions/analyze-entry/{entry_id}")
@@ -268,16 +398,15 @@ async def api_close_browser():
 
 
 class RepairIn(BaseModel):
-    folder: str
+    folder: str = ""
     dry_run: bool = True
 
 
 @app.post("/api/actions/repair-rename")
 async def api_repair_rename(payload: RepairIn):
     """Occurrence-counted rename of a legacy dump folder against this docket."""
-    case = _case_row()
-    cfg = config.load_config()
-    folder = Path(payload.folder)
+    case = _active_case()
+    folder = Path(payload.folder) if payload.folder.strip() else _case_folder(case)
     if not folder.is_dir():
         raise HTTPException(400, f"Not a folder: {folder}")
     by_entry: dict[int, list] = {}
@@ -296,9 +425,10 @@ async def api_repair_rename(payload: RepairIn):
         raise HTTPException(400, "No docket index yet — run a check first so the "
                                  "app knows the entry order.")
     actions = renamer.repair_folder(
-        folder, config.normalize_case_id(cfg["case"]["case_number"]),
+        folder, config.normalize_case_id(case["case_number"]),
         index, dry_run=payload.dry_run)
-    return {"ok": True, "dry_run": payload.dry_run, "actions": actions,
+    return {"ok": True, "dry_run": payload.dry_run, "folder": str(folder),
+            "actions": actions,
             "summary": {
                 "rename": sum(1 for a in actions if a["status"] == "rename"),
                 "unmatched": sum(1 for a in actions if a["status"] == "unmatched"),
