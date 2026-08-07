@@ -41,21 +41,28 @@ sequence spine), **Documents** (file table), **Notes**, **Analysis**,
 
 ## Install
 
-1. Download the latest **MDEC-Docket-Manager-*.zip* from
-   [Releases](https://github.com/sasha-thecornerspore-dev/mdec-docket-manager/releases).
-2. Unzip it anywhere you like (it stays there — this is not a system install).
-3. Double-click **`Install.cmd`**.
+Download **`MDEC-Docket-Manager-<version>-Setup.exe`** from
+[Releases](https://github.com/sasha-thecornerspore-dev/mdec-docket-manager/releases)
+and run it. **No Python needed** — it's bundled. Installs per-user, so no
+administrator prompt, and puts a **MDEC Docket Manager** icon on your Desktop and
+in the Start Menu.
 
-That installs the Python packages, downloads the private browser it drives, and
-puts a **MDEC Docket Manager** icon on your Desktop and in the Start Menu. You
-need [Python 3.11+](https://www.python.org/downloads/) first — tick *"Add
-python.exe to PATH"* when installing it.
+From then on it's just the icon. No terminal, no console window.
 
-From then on it's just the icon. No terminal, no console window: the app opens in
-its own window in about three seconds.
+> SmartScreen will warn about an unrecognized publisher — the installer isn't
+> code-signed. **More info → Run anyway**, or install from source instead.
+
+On first run, click **Download browser** on the Dashboard to fetch the private
+Chromium the app drives (~130 MB, once).
 
 <details>
-<summary>Prefer to run from source?</summary>
+<summary>Install from source instead (needed for OCR)</summary>
+
+Download the small `MDEC-Docket-Manager-<version>.zip` from Releases, unzip, and
+double-click `Install.cmd`. Needs [Python 3.11+](https://www.python.org/downloads/)
+with *"Add python.exe to PATH"* ticked.
+
+Or from a clone:
 
 ```bash
 git clone https://github.com/sasha-thecornerspore-dev/mdec-docket-manager.git
@@ -65,7 +72,7 @@ python -m playwright install chromium
 python run.py            # or: python run.py --app   for the app window
 ```
 
-`Install.cmd` works in a clone too, and is the easier path — it creates the icon.
+The source install starts faster (~3 s vs ~12 s) and is the only way to get OCR.
 </details>
 
 ## First run

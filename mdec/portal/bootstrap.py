@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import os
 import subprocess
+from pathlib import Path
 
 # Playwright's specific wording when the browser binaries aren't downloaded.
 # Keep these narrow: "browsertype.launch" appears in almost every Playwright
@@ -46,7 +47,25 @@ def chromium_present() -> bool:
             path = p.chromium.executable_path
             return bool(path) and os.path.exists(path)
     except Exception:
+        # Starting the driver can fail for reasons that have nothing to do with
+        # whether the browser is downloaded (notably inside a frozen build).
+        # Falling back to the filesystem stops the app claiming the browser is
+        # missing and pushing a pointless 130 MB download.
+        return _chromium_on_disk()
+
+
+def _chromium_on_disk() -> bool:
+    """Is there a Chromium under Playwright's browsers directory?"""
+    base = os.environ.get("PLAYWRIGHT_BROWSERS_PATH")
+    if not base:
+        local = os.environ.get("LOCALAPPDATA")
+        if not local:
+            return False
+        base = str(Path(local) / "ms-playwright")
+    root = Path(base)
+    if not root.is_dir():
         return False
+    return any(root.glob("chromium-*/chrome-win/chrome.exe"))
 
 
 async def chromium_present_async() -> bool:

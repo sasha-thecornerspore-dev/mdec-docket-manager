@@ -56,8 +56,13 @@ a = Analysis(
     # Weight we never use. ocrmypdf stays out on purpose: it drags in pikepdf and
     # a Ghostscript/Tesseract expectation, and OCR is opt-in — the app degrades
     # to "OCR unavailable" with a clear message instead.
+    # Weight we never use. torch/tensorflow get dragged in through optional
+    # imports in unrelated packages and add hundreds of MB for nothing, which
+    # also slows launch (Windows scans every file).
     excludes=["ocrmypdf", "pikepdf", "matplotlib", "numpy.testing",
-              "pytest", "PyInstaller", "IPython", "notebook"],
+              "pytest", "PyInstaller", "IPython", "notebook",
+              "torch", "tensorflow", "tensorboard", "scipy", "pandas",
+              "sklearn", "transformers"],
     noarchive=False,
     optimize=0,
 )

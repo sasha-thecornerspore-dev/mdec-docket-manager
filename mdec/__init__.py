@@ -1,3 +1,3 @@
 """MDEC Docket Manager — monitor, maintain, and analyze a Maryland Judiciary case docket."""
 
-__version__ = "1.1.0"
+__version__ = "1.2.0"

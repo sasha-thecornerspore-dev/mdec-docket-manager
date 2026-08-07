@@ -494,6 +494,37 @@ def test_desktop_falls_back_when_the_port_is_taken():
         squatter.close()
 
 
+def test_chromium_on_disk_detects_an_installed_browser(monkeypatch, dump):
+    """The filesystem fallback keeps the app from claiming the browser is
+    missing (and pushing a 130 MB download) when the driver won't start."""
+    from mdec.portal import bootstrap
+    monkeypatch.setenv("PLAYWRIGHT_BROWSERS_PATH", str(dump))
+    assert bootstrap._chromium_on_disk() is False
+    exe = dump / "chromium-1228" / "chrome-win" / "chrome.exe"
+    exe.parent.mkdir(parents=True)
+    exe.write_bytes(b"MZ")
+    assert bootstrap._chromium_on_disk() is True
+
+
+def test_chromium_on_disk_ignores_unrelated_folders(monkeypatch, dump):
+    from mdec.portal import bootstrap
+    monkeypatch.setenv("PLAYWRIGHT_BROWSERS_PATH", str(dump))
+    (dump / "ffmpeg-1011").mkdir()
+    (dump / "chromium_headless_shell-1228").mkdir()
+    assert bootstrap._chromium_on_disk() is False
+
+
+def test_missing_browser_markers_are_narrow():
+    """'browsertype.launch' appears in nearly every Playwright launch error;
+    matching it would misreport a crash as a missing download."""
+    from mdec.portal import bootstrap
+    real = Exception("Executable doesn't exist at C:\\...\\chrome.exe")
+    assert bootstrap.looks_like_missing_browser(real) is True
+    crash = Exception("BrowserType.launch: Target page, context or browser "
+                      "has been closed")
+    assert bootstrap.looks_like_missing_browser(crash) is False
+
+
 def test_desktop_reports_a_dead_server_as_down():
     from mdec import desktop
     import socket

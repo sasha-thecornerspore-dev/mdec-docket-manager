@@ -60,9 +60,28 @@ def _alert(message: str) -> None:
         pass
 
 
+def _fix_playwright_browsers_path() -> None:
+    """Point Playwright at the standard browser location.
+
+    Frozen, Playwright resolves its browsers relative to the bundled driver
+    inside _internal, so it looks in the wrong place and reports Chromium as not
+    downloaded even when it is installed. Setting this explicitly to the same
+    directory `playwright install` uses makes the packaged app find it.
+
+    Only set when absent, so anyone who has deliberately relocated their
+    browsers keeps their choice.
+    """
+    if os.environ.get("PLAYWRIGHT_BROWSERS_PATH"):
+        return
+    local = os.environ.get("LOCALAPPDATA")
+    if local:
+        os.environ["PLAYWRIGHT_BROWSERS_PATH"] = str(Path(local) / "ms-playwright")
+
+
 def main() -> int:
     multiprocessing.freeze_support()   # must precede anything that may spawn
     _fix_streams()
+    _fix_playwright_browsers_path()
 
     argv = sys.argv[1:]
     port = None

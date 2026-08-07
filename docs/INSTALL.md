@@ -14,10 +14,34 @@ normally already true.
 portal and see your case's documents. The app automates the browser you already
 use; it cannot grant access you don't have.
 
-## Install
+## Install — the easy way (no Python needed)
 
-1. Download the latest `MDEC-Docket-Manager-*.zip` from
-   [Releases](https://github.com/sasha-thecornerspore-dev/mdec-docket-manager/releases).
+Download **`MDEC-Docket-Manager-<version>-Setup.exe`** from
+[Releases](https://github.com/sasha-thecornerspore-dev/mdec-docket-manager/releases)
+and run it.
+
+It installs per-user under `%LOCALAPPDATA%\Programs`, so there is **no
+administrator prompt**, and it creates Desktop and Start Menu shortcuts. Python
+is bundled — you don't need it installed. Uninstall from Settings → Apps like
+any other program.
+
+On first run the app downloads the private Chromium it drives (~130 MB, once) —
+the Dashboard has a **Download browser** button for it.
+
+> Windows SmartScreen will warn about an unrecognized publisher, because the
+> installer isn't code-signed (a certificate costs money). Choose **More info →
+> Run anyway**, or use the source install below if you'd rather not.
+
+There is also a `-portable.zip` of the same app if you prefer to unzip and run
+`MDECDocketManager.exe` without installing.
+
+## Install — from source
+
+Better if you want OCR (excluded from the packaged build) or want to modify the
+app. Needs Python 3.11+.
+
+1. Download the latest `MDEC-Docket-Manager-<version>.zip` (the small one, not
+   `-portable`) from Releases.
 2. Unzip it wherever you want to keep it. The app runs from that folder — moving
    it later means running `Install.cmd` again to fix the shortcuts.
 3. Double-click **`Install.cmd`** and follow it.
@@ -93,11 +117,7 @@ python tools/make_release.py
 Writes `dist/MDEC-Docket-Manager-<version>.zip` containing the app, icon, docs,
 and installer — no runtime data, no case data.
 
-## Standalone .exe — experimental, not shipped
-
-`tools/mdec.spec`, `tools/frozen_entry.py`, `tools/installer.iss`, and
-`tools/build_installer.py` build a PyInstaller bundle and an Inno Setup
-installer, so users would not need Python at all:
+## Building the installer
 
 ```bash
 python -m pip install pyinstaller
@@ -105,19 +125,41 @@ winget install JRSoftware.InnoSetup
 python tools/build_installer.py
 ```
 
-**This is not what the releases ship, and it is not finished.** Two problems are
-unresolved:
+Produces in `dist/`:
 
-1. **Playwright does not work inside the bundle.** It launches fine from source
-   but fails in the frozen app, which breaks the app's core job — reading the
-   docket. Bundling Playwright's node driver correctly is the open work.
-2. **Startup is much slower** — around 12 seconds warm and a minute cold, versus
-   about 3 seconds from source, because Windows scans an unsigned 91 MB
-   executable and its ~760 supporting files.
+| File | What it is |
+|---|---|
+| `MDEC-Docket-Manager-<ver>-Setup.exe` | The installer. Per-user, no admin prompt. |
+| `MDEC-Docket-Manager-<ver>-portable.zip` | The same app as a folder to unzip and run. |
 
-Until both are fixed, the zip plus `Install.cmd` is the better product: it starts
-faster and it actually works. Treat the packaging scripts as a starting point,
-not a supported path.
+`--skip-exe` reuses an existing PyInstaller build (much faster when you're only
+iterating on the installer); `--no-installer` builds just the app.
+
+### Two things the frozen build needs that source doesn't
+
+Both are handled in `tools/frozen_entry.py`; they're recorded here because
+neither failure is obvious when it happens.
+
+**Playwright's browser path.** Frozen, Playwright resolves its browsers relative
+to the bundled driver inside `_internal`, looks in the wrong place, and reports
+Chromium as not downloaded even when it's installed. The entry point sets
+`PLAYWRIGHT_BROWSERS_PATH` to the standard location (only when unset, so a
+deliberate relocation still wins).
+
+**No standard streams.** A windowed build has `sys.stdout is None`, so `print()`
+and uvicorn's log handler raise `AttributeError` and the app dies with no visible
+error. The entry point redirects the streams to the null device before importing
+anything that logs, and writes any startup failure to
+`%APPDATA%\MDECDocketManager\startup-error.log`.
+
+### Deliberate exclusions
+
+`torch`, `tensorflow`, `scipy`, `pandas` and friends get pulled in through
+optional imports in unrelated packages and add hundreds of megabytes for
+nothing — they're excluded in `tools/mdec.spec`. `ocrmypdf` is also excluded: it
+drags in pikepdf and expects Ghostscript, and OCR is opt-in, so the packaged
+build reports OCR as unavailable with a message pointing at the source install
+rather than doubling the download.
 
 ## Where your data lives
 
