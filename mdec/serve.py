@@ -30,6 +30,29 @@ def _write_runtime(port: int) -> None:
     atexit.register(_clear_runtime, path, os.getpid())
 
 
+def _log_to_file() -> None:
+    """Send app and uvicorn logs to %APPDATA%\\MDECDocketManager\\app.log."""
+    import logging
+    import logging.handlers
+    path = config.app_dir() / "app.log"
+    handler = logging.handlers.RotatingFileHandler(
+        path, maxBytes=1_000_000, backupCount=2, encoding="utf-8")
+    handler.setFormatter(logging.Formatter(
+        "%(asctime)s %(levelname)-7s %(name)s: %(message)s"))
+    root = logging.getLogger()
+    root.setLevel(logging.INFO)
+    root.addHandler(handler)
+    for name in ("uvicorn", "uvicorn.error", "uvicorn.access", "mdec"):
+        lg = logging.getLogger(name)
+        lg.setLevel(logging.INFO)
+        lg.propagate = True
+
+    def _hook(exc_type, exc, tb):
+        logging.getLogger("mdec").critical("unhandled exception",
+                                           exc_info=(exc_type, exc, tb))
+    sys.excepthook = _hook
+
+
 def _clear_runtime(path, owner_pid: int) -> None:
     """Only remove the file if it's still ours — a newer instance may own it."""
     try:
@@ -64,11 +87,14 @@ def main(argv: list[str] | None = None) -> int:
         return 1
 
     _write_runtime(port)
-    # Quieter when there's no console to read it (the desktop launcher path).
+    # Without a console there is nowhere for a failure to show up, so log to a
+    # file. It is also the thing to ask for in a bug report.
     headless = not sys.stdout or not sys.stdout.isatty()
+    if headless:
+        _log_to_file()
     server = uvicorn.Server(uvicorn.Config(
         app, host=host, port=port,
-        log_level="warning" if headless else "info"))
+        log_level="info" if headless else "info"))
     if not args.no_open:
         def _open() -> None:
             deadline = time.monotonic() + 30
@@ -81,9 +107,22 @@ def main(argv: list[str] | None = None) -> int:
                 webbrowser.open(url)
         threading.Thread(target=_open, daemon=True).start()
 
+    import logging
+    log = logging.getLogger("mdec.serve")
+    log.info("starting on %s (frozen=%s, pid=%s)", url,
+             getattr(sys, "frozen", False), os.getpid())
     print(f"MDEC Docket Manager — {url}")
     print(f"Settings and database: {config.app_dir()}")
-    server.run()
+    try:
+        server.run()
+    except BaseException:
+        log.critical("server.run() raised", exc_info=True)
+        raise
+    # Reaching here means uvicorn stopped. On the desktop path that is a bug
+    # unless the user asked to quit, so record why.
+    log.warning("server.run() returned — should_exit=%s force_exit=%s",
+                getattr(server, "should_exit", "?"),
+                getattr(server, "force_exit", "?"))
     return 0
 
 

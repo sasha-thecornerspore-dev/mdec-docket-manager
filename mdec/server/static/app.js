@@ -161,6 +161,8 @@ async function loadFeatures() {
   catch { return; }
   renderChecklist();
   const f = state.features;
+  // The packaged build ships without the browser binaries; offer the download.
+  $('#btnInstallBrowser').hidden = !!f.browser_installed;
   const ocrEl = $('#ocrState'), anEl = $('#analysisState');
   if (ocrEl) ocrEl.textContent = f.ocr_available
     ? 'OCR tools found (Tesseract + Ghostscript).' : f.ocr_why;
@@ -176,11 +178,18 @@ function renderChecklist() {
   const rows = [
     [!!s.case.case_number, 'Case added',
       'Add a case in Settings → Cases.'],
+  ];
+  if (f) rows.push(
+    [f.browser_installed, 'Browser installed',
+      'The private browser this app drives is not downloaded yet — use ' +
+      '"Download browser" below (~130 MB, once).'],
+  );
+  rows.push(
     [s.browser_running, 'Portal browser open',
       'Click "Open portal window" and sign in.'],
     [s.schedule.enabled, `Scheduled checks at ${s.schedule.times.join(', ')}`,
       'Scheduled checks are off.'],
-  ];
+  );
   if (f) rows.push(
     [f.analysis_enabled && f.analysis_backend !== 'none',
       `Claude analysis (${f.analysis_backend})`,
@@ -684,6 +693,20 @@ document.addEventListener('click', async ev => {
 });
 
 /* --- actions ----------------------------------------------------------- */
+
+$('#btnInstallBrowser').addEventListener('click', async () => {
+  const b = $('#btnInstallBrowser');
+  if (!confirm('Download the private browser this app drives?\n\n' +
+               'About 130 MB, once. It is separate from your everyday browser.')) return;
+  b.disabled = true; b.textContent = 'Downloading… (this takes a few minutes)';
+  try {
+    const r = await api('/actions/install-browser', { method: 'POST' });
+    toast(r.message, !r.ok);
+    state.features = null;
+    await loadFeatures();
+  } catch (e) { toast(e.message, true); }
+  finally { b.disabled = false; b.textContent = 'Download browser (~130 MB)'; }
+});
 
 $('#btnAdopt').addEventListener('click', async () => {
   const b = $('#btnAdopt');

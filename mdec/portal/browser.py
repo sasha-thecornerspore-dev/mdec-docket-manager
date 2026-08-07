@@ -17,6 +17,10 @@ class NotLoggedIn(Exception):
     """Raised when the portal bounced us to a login page and we can't self-login."""
 
 
+class BrowserMissing(Exception):
+    """Playwright is installed but its Chromium hasn't been downloaded."""
+
+
 class Browser:
     def __init__(self) -> None:
         self._pw = None
@@ -31,15 +35,40 @@ class Browser:
         async with self._lock:
             if self._ctx:
                 return self._ctx
-            from playwright.async_api import async_playwright
+            try:
+                from playwright.async_api import async_playwright
+            except ImportError as exc:
+                raise BrowserMissing(
+                    "Playwright isn't available in this build, so the portal "
+                    "can't be opened. Run the app from source — see "
+                    "docs/INSTALL.md."
+                ) from exc
             self._pw = await async_playwright().start()
-            self._ctx = await self._pw.chromium.launch_persistent_context(
-                self.profile_dir,
-                headless=False,
-                accept_downloads=True,
-                viewport={"width": 1400, "height": 950},
-            )
+            try:
+                self._ctx = await self._pw.chromium.launch_persistent_context(
+                    self.profile_dir,
+                    headless=False,
+                    accept_downloads=True,
+                    viewport={"width": 1400, "height": 950},
+                )
+            except Exception as exc:
+                await self._teardown_pw()
+                from . import bootstrap
+                if bootstrap.looks_like_missing_browser(exc):
+                    raise BrowserMissing(
+                        "The private browser this app drives hasn't been "
+                        "downloaded yet (about 130 MB, once). Click \"Download "
+                        "browser\" on the Dashboard."
+                    ) from exc
+                raise
             return self._ctx
+
+    async def _teardown_pw(self) -> None:
+        if self._pw:
+            try:
+                await self._pw.stop()
+            finally:
+                self._pw = None
 
     async def page(self):
         ctx = await self.start()

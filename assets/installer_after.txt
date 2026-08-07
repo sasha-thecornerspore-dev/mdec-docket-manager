@@ -1,0 +1,34 @@
+MDEC Docket Manager is installed.
+
+FIRST RUN
+
+1. Open the app from your Desktop or Start Menu.
+2. Settings -> Cases -> add your case number (as printed, with dashes) and
+   choose a folder for its documents.
+3. Click "Open portal window" and sign in to the Maryland Judiciary portal
+   yourself. The app never handles your password unless you explicitly turn on
+   managed login.
+4. Click "Check now".
+
+The first check on a large docket takes a while - roughly 20 minutes per 1,000
+documents - because downloads are paced to stay under the portal's throttle.
+Later checks only fetch what is new, and take seconds.
+
+A ONE-TIME DOWNLOAD
+
+The first check also downloads a private copy of Chromium (about 130 MB) that
+the app drives. The app tells you when this is happening. It is separate from
+your everyday browser and keeps its own signed-in session.
+
+THINGS WORTH KNOWING
+
+- Closing the window does NOT quit the app. The service keeps running so
+  scheduled checks still happen. Clicking the icon again reopens the window.
+  To stop it: Settings -> Quit app.
+- Your documents, notes, and settings live outside this folder, so upgrading or
+  uninstalling never touches them.
+- Analysis features are informational only and are NOT legal advice. Verify
+  every date and deadline against the filings themselves.
+
+Documentation is in the docs folder, and on GitHub:
+https://github.com/sasha-thecornerspore-dev/mdec-docket-manager

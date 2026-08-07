@@ -29,6 +29,15 @@ def available() -> tuple[bool, str]:
     without executing it.
     """
     if importlib.util.find_spec("ocrmypdf") is None:
+        from .. import paths
+        if paths.is_frozen():
+            # Deliberately left out of the packaged build: ocrmypdf pulls in
+            # pikepdf and expects Ghostscript, which would roughly double the
+            # download for an opt-in feature. Telling the user to pip install
+            # would be useless advice — there's no environment to install into.
+            return False, ("OCR is not included in the installed build. To use "
+                           "it, run the app from source (see docs/INSTALL.md) "
+                           "with ocrmypdf, Tesseract, and Ghostscript.")
         return False, "Python package 'ocrmypdf' is not installed (pip install ocrmypdf)."
     missing = [t for t in ("tesseract", "gs") if shutil.which(t) is None]
     if missing:

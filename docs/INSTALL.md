@@ -74,6 +74,16 @@ Three behaviors worth knowing:
 
 To stop the service, use **Settings → Quit app**.
 
+## The one-time browser download
+
+The app drives its own private copy of Chromium, separate from your everyday
+browser. `Install.cmd` downloads it (~130 MB). If that step was skipped or
+failed — you were offline, say — the Dashboard shows **Browser installed ✗** and
+a **Download browser** button that fetches it without needing a terminal.
+
+Checks cannot run until it's present; the app says so plainly rather than
+failing at the first click.
+
 ## Building a release zip
 
 ```bash
@@ -82,6 +92,32 @@ python tools/make_release.py
 
 Writes `dist/MDEC-Docket-Manager-<version>.zip` containing the app, icon, docs,
 and installer — no runtime data, no case data.
+
+## Standalone .exe — experimental, not shipped
+
+`tools/mdec.spec`, `tools/frozen_entry.py`, `tools/installer.iss`, and
+`tools/build_installer.py` build a PyInstaller bundle and an Inno Setup
+installer, so users would not need Python at all:
+
+```bash
+python -m pip install pyinstaller
+winget install JRSoftware.InnoSetup
+python tools/build_installer.py
+```
+
+**This is not what the releases ship, and it is not finished.** Two problems are
+unresolved:
+
+1. **Playwright does not work inside the bundle.** It launches fine from source
+   but fails in the frozen app, which breaks the app's core job — reading the
+   docket. Bundling Playwright's node driver correctly is the open work.
+2. **Startup is much slower** — around 12 seconds warm and a minute cold, versus
+   about 3 seconds from source, because Windows scans an unsigned 91 MB
+   executable and its ~760 supporting files.
+
+Until both are fixed, the zip plus `Install.cmd` is the better product: it starts
+faster and it actually works. Treat the packaging scripts as a starting point,
+not a supported path.
 
 ## Where your data lives
 

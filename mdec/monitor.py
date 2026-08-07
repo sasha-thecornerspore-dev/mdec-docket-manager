@@ -229,7 +229,7 @@ class Monitor:
             return {"ok": True, "new_entries": len(new), "new_documents": new_docs,
                     "adopted": adopted["adopted"], "warnings": warnings}
 
-        except (br.NotLoggedIn, login.LoginFailed) as exc:
+        except (br.NotLoggedIn, br.BrowserMissing, login.LoginFailed) as exc:
             db.finish_run(run_id, "warning", log=str(exc))
             self.status["message"] = str(exc)
             return {"ok": False, "message": str(exc)}
@@ -290,7 +290,10 @@ class Monitor:
     # --- on-demand actions ---------------------------------------------------
 
     async def open_portal(self, case_id: int | None = None) -> str:
-        """Open the visible portal window on the case page (attach-mode login)."""
+        """Open the visible portal window on the case page (attach-mode login).
+
+        Raises BrowserMissing with actionable wording if Chromium isn't there.
+        """
         cfg = config.load_config()
         case = self._resolve_case(case_id)
         page = await br.browser.page()

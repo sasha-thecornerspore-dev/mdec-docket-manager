@@ -28,3 +28,9 @@ Thumbs.db
 # Release artifacts (attached to GitHub Releases, not committed)
 dist/
 
+
+# PyInstaller output (experimental packaging)
+build_dist/
+build_work/
+*.spec.bak
+

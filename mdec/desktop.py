@@ -22,7 +22,7 @@ import urllib.error
 import urllib.request
 from pathlib import Path
 
-from . import config
+from . import config, paths
 
 APP_NAME = "MDEC Docket Manager"
 
@@ -131,8 +131,13 @@ def spawn_server(port: int | None = None) -> subprocess.Popen | None:
     """
     root = Path(__file__).resolve().parent.parent
     exe = Path(sys.executable)
-    pythonw = exe.with_name("pythonw.exe")
-    cmd = [str(pythonw if pythonw.is_file() else exe), "-m", "mdec.serve", "--no-open"]
+    if paths.is_frozen():
+        # There is no interpreter to re-invoke; the exe is the entry point.
+        cmd = [str(exe), "--serve"]
+    else:
+        pythonw = exe.with_name("pythonw.exe")
+        cmd = [str(pythonw if pythonw.is_file() else exe),
+               "-m", "mdec.serve", "--no-open"]
     if port:
         cmd += ["--port", str(port)]
 

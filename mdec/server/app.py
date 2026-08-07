@@ -16,13 +16,13 @@ from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
-from .. import __version__, config, db
+from .. import __version__, config, db, paths
 from ..monitor import monitor
 from ..pipeline import analyzer, ocr, renamer
 from ..portal import browser as br
 
-STATIC = Path(__file__).parent / "static"
-ASSETS = Path(__file__).resolve().parent.parent.parent / "assets"
+STATIC = paths.static_dir()
+ASSETS = paths.assets_dir()
 
 app = FastAPI(title="MDEC Docket Manager", version=__version__)
 
@@ -126,7 +126,10 @@ async def api_features():
         analysis_backend, analysis_why = backend, ""
     except analyzer.AnalyzerNotConfigured as exc:
         analysis_backend, analysis_why = "none", str(exc)
+    from ..portal import bootstrap
     return {
+        "browser_installed": await bootstrap.chromium_present_async(),
+        "packaged": paths.is_frozen(),
         "ocr_enabled": cfg["ocr"]["enabled"],
         "ocr_available": ocr_ok,
         "ocr_why": ocr_why,
@@ -349,6 +352,9 @@ async def api_set_secret(s: SecretIn):
 async def api_open_portal():
     try:
         return {"ok": True, "message": await monitor.open_portal()}
+    except br.BrowserMissing as exc:
+        # Expected on a fresh install — the fix is a button, not a stack trace.
+        return {"ok": False, "message": str(exc)}
     except Exception as exc:
         return JSONResponse({"ok": False, "message": f"{type(exc).__name__}: {exc}"},
                             status_code=500)
@@ -362,6 +368,22 @@ async def api_check_now(case_id: int | None = None):
 @app.post("/api/actions/check-all")
 async def api_check_all():
     return await monitor.run_all_cases()
+
+
+@app.post("/api/actions/install-browser")
+async def api_install_browser():
+    """Download Playwright's Chromium. Explicit rather than automatic — it's a
+    ~130 MB download and the user should know it's happening."""
+    from ..portal import bootstrap
+    if await bootstrap.chromium_present_async():
+        return {"ok": True, "message": "The browser is already installed."}
+    monitor.status["message"] = "downloading browser (~130 MB)"
+    try:
+        ok, msg = await asyncio.get_running_loop().run_in_executor(
+            None, bootstrap.install_chromium)
+    finally:
+        monitor.status["message"] = "idle"
+    return {"ok": ok, "message": msg}
 
 
 @app.post("/api/actions/adopt")

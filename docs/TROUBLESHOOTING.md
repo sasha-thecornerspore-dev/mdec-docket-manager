@@ -37,10 +37,16 @@ python -m pip install -r requirements.txt
 ```
 
 ### `Executable doesn't exist at ...ms-playwright...`
-Chromium was never downloaded:
+Chromium was never downloaded. Easiest fix: the **Download browser** button on
+the Dashboard. From a terminal:
 ```bash
 python -m playwright install chromium
 ```
+
+### The Dashboard says the browser isn't installed, but checks used to work
+Playwright pins a specific Chromium build per version, so upgrading Playwright
+can leave the old build behind and require a new download. Click **Download
+browser**; the previous build is left alone.
 
 ### Port already in use
 Handled automatically — the app moves to the next free port and records it in
