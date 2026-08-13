@@ -36,11 +36,19 @@ def sanitize(name: str, max_len: int = 120) -> str:
 
 
 def date_stamp(file_date: str) -> str:
-    """'8/26/2024' -> '20240826'; unknown dates -> 'XXXXXXXX' (sorts predictably)."""
-    m = re.match(r"\s*(\d{1,2})/(\d{1,2})/(\d{4})\s*$", file_date or "")
+    """'8/26/2024' -> '20240826'; unknown dates -> 'XXXXXXXX' (sorts predictably).
+
+    Some portal sections append a time ("29/09/2025, 15:06:37") and use
+    day-first order, so trailing time is dropped and an impossible month is
+    read as day-first rather than thrown away.
+    """
+    text = (file_date or "").split(",")[0].strip()
+    m = re.match(r"\s*(\d{1,2})/(\d{1,2})/(\d{4})\s*$", text)
     if not m:
         return "XXXXXXXX"
     mm, dd, yyyy = int(m.group(1)), int(m.group(2)), int(m.group(3))
+    if mm > 12 and dd <= 12:
+        mm, dd = dd, mm
     try:
         return datetime(yyyy, mm, dd).strftime("%Y%m%d")
     except ValueError:

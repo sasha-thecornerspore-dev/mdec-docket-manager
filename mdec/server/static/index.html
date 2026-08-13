@@ -50,17 +50,27 @@
         route is to get there yourself and then hand over. Downloads and the
         folder are settled before any clicking starts.</p>
       <ol class="steps">
-        <li><strong>Open portal window</strong> — sign in, clear any
-          verification, and open your case so the docket is on screen.</li>
+        <li><strong>Open Chrome for harvesting</strong> — opens your real
+          Chrome (not the app's browser) on your case. Sign in there and clear
+          any verification. The portal trusts this browser; it does not trust
+          the app's, which is why signing in there can fail.</li>
+        <li><strong>Attach</strong> — the app takes hold of that tab. It never
+          navigates it, so your session and cleared challenge stay intact.</li>
         <li><strong>Check readiness</strong> — confirms the folder is writable,
           multiple downloads are pre-approved, and the docket parses.</li>
-        <li><strong>Harvest from this page</strong> — downloads everything not
-          already on disk, paced, without navigating away.</li>
+        <li><strong>Harvest</strong> — downloads everything not already on
+          disk, paced.</li>
       </ol>
       <div class="toolbar">
+        <button id="btnStartChrome" class="btn">Open Chrome for harvesting</button>
+        <button id="btnAttach" class="btn">Attach</button>
         <button id="btnPreflight" class="btn">Check readiness</button>
-        <button id="btnHarvest" class="btn btn-primary" disabled>Harvest from this page</button>
+        <button id="btnHarvest" class="btn btn-primary" disabled>Harvest</button>
       </div>
+      <p class="fineprint">The harvesting Chrome uses its own profile and
+        listens on a local debug port while open, which lets any program on this
+        computer drive it. Close that window when you're done. Your everyday
+        Chrome profile is never touched.</p>
       <div id="preflightOut" class="repair-out"></div>
     </div>
 

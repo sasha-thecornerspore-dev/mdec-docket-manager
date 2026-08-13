@@ -733,6 +733,31 @@ function renderPreflight(r) {
   $('#btnHarvest').disabled = !r.ok;
 }
 
+$('#btnStartChrome').addEventListener('click', async () => {
+  const b = $('#btnStartChrome');
+  b.disabled = true; b.textContent = 'Opening Chrome…';
+  try {
+    const r = await api('/actions/start-chrome', { method: 'POST' });
+    toast(r.message, !r.ok);
+  } catch (e) { toast(e.message, true); }
+  finally { b.disabled = false; b.textContent = 'Open Chrome for harvesting'; }
+});
+
+$('#btnAttach').addEventListener('click', async () => {
+  const b = $('#btnAttach');
+  b.disabled = true; b.textContent = 'Attaching…';
+  try {
+    const r = await api('/actions/attach-chrome', { method: 'POST' });
+    toast(r.message, !r.ok);
+    $('#preflightOut').innerHTML =
+      `<p class="hint"><strong>${esc(r.message)}</strong></p>` +
+      (r.url ? `<div class="r-row"><span>tab</span><span>${esc(r.url)}</span>
+                <span>${esc(r.state || '')}</span></div>` : '');
+    await refreshAll();
+  } catch (e) { toast(e.message, true); }
+  finally { b.disabled = false; b.textContent = 'Attach'; }
+});
+
 $('#btnPreflight').addEventListener('click', async () => {
   const b = $('#btnPreflight');
   b.disabled = true; b.textContent = 'Checking…';

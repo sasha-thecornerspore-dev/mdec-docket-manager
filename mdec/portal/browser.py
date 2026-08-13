@@ -99,6 +99,100 @@ async def prepare_downloads(context, page, folder) -> dict:
     return result
 
 
+# --- driving the user's real Chrome ---------------------------------------
+#
+# Playwright's bundled Chromium announces itself: automation switches, CDP from
+# launch, navigator.webdriver. The portal's bot detection reads that and serves
+# a challenge, so signing in there can be impossible even for the rightful
+# account holder.
+#
+# Real Chrome, started normally and merely *listening* on a debug port, carries
+# an ordinary fingerprint. Attaching afterwards drives the same browser the user
+# signed in with, instead of a look-alike the site distrusts.
+
+CHROME_CANDIDATES = (
+    r"%ProgramFiles%\Google\Chrome\Application\chrome.exe",
+    r"%ProgramFiles(x86)%\Google\Chrome\Application\chrome.exe",
+    r"%LocalAppData%\Google\Chrome\Application\chrome.exe",
+    r"%ProgramFiles%\Microsoft\Edge\Application\msedge.exe",
+    r"%ProgramFiles(x86)%\Microsoft\Edge\Application\msedge.exe",
+)
+
+
+def find_user_chrome() -> str | None:
+    for raw in CHROME_CANDIDATES:
+        p = Path(os.path.expandvars(raw))
+        if p.is_file():
+            return str(p)
+    return None
+
+
+def harvest_profile_dir() -> Path:
+    """A dedicated Chrome profile for harvesting.
+
+    Chrome refuses --remote-debugging-port against the default profile, so this
+    has to be its own directory. It is still ordinary Chrome — the user signs in
+    here once and the session persists.
+    """
+    return config.app_dir() / ".chrome-harvest"
+
+
+def debug_port_alive(port: int, timeout: float = 1.5) -> dict | None:
+    import json as _json
+    import urllib.error
+    import urllib.request
+    try:
+        with urllib.request.urlopen(f"http://127.0.0.1:{port}/json/version",
+                                    timeout=timeout) as r:
+            return _json.loads(r.read().decode("utf-8", "replace"))
+    except (urllib.error.URLError, OSError, ValueError, TimeoutError):
+        return None
+
+
+def start_user_chrome(port: int = 9222, url: str | None = None) -> dict:
+    """Start real Chrome with a debug port and its own harvest profile."""
+    existing = debug_port_alive(port)
+    if existing:
+        return {"ok": True, "already_running": True,
+                "browser": existing.get("Browser", ""),
+                "message": f"Chrome is already listening on port {port}."}
+
+    exe = find_user_chrome()
+    if not exe:
+        return {"ok": False, "message":
+                "Could not find Chrome or Edge. Install one, or open the "
+                "portal in your own browser and download by hand."}
+
+    profile = harvest_profile_dir()
+    profile.mkdir(parents=True, exist_ok=True)
+    allow_automatic_downloads(str(profile))
+
+    args = [exe, f"--remote-debugging-port={port}",
+            f"--user-data-dir={profile}",
+            "--no-first-run", "--no-default-browser-check"]
+    if url:
+        args.append(url)
+    try:
+        subprocess.Popen(args, stdin=subprocess.DEVNULL,
+                         stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    except OSError as exc:
+        return {"ok": False, "message": f"Could not start Chrome: {exc}"}
+
+    import time
+    deadline = time.monotonic() + 30
+    while time.monotonic() < deadline:
+        info = debug_port_alive(port)
+        if info:
+            return {"ok": True, "already_running": False,
+                    "browser": info.get("Browser", ""), "profile": str(profile),
+                    "message": ("Chrome is open. Sign in to the portal and "
+                                "open your case, then come back here.")}
+        time.sleep(0.5)
+    return {"ok": False, "message":
+            f"Chrome started but never opened debug port {port}. If Chrome was "
+            f"already running, close every window and try again."}
+
+
 def close_orphaned_browsers(profile_dir: str) -> int:
     """Close Chromium processes still holding our profile directory.
 
@@ -130,6 +224,8 @@ class Browser:
     def __init__(self) -> None:
         self._pw = None
         self._ctx = None
+        self._remote = None
+        self._attached = False
         self._lock = asyncio.Lock()
 
     @property
@@ -211,27 +307,105 @@ class Browser:
                 self._pw = None
 
     async def page(self):
+        if self._attached:
+            # Use the tab the user left the docket on; never open our own.
+            p = await self.docket_page()
+            if p is not None:
+                return p
+            raise BrowserBusy(
+                "Attached to Chrome but it has no open tabs. Open your case in "
+                "that Chrome window, then try again.")
         ctx = await self.start()
         if ctx.pages:
             return ctx.pages[0]
         return await ctx.new_page()
 
+    async def attach(self, port: int = 9222):
+        """Drive the user's own Chrome over CDP instead of launching one.
+
+        The site trusts that browser and has already let them sign in; we just
+        borrow the tab they have open.
+        """
+        async with self._lock:
+            if self._ctx and self._attached:
+                return self._ctx
+            if self._ctx:
+                await self._close_locked()
+            from playwright.async_api import async_playwright
+            if not self._pw:
+                self._pw = await async_playwright().start()
+            try:
+                self._remote = await self._pw.chromium.connect_over_cdp(
+                    f"http://127.0.0.1:{port}")
+            except Exception as exc:
+                raise BrowserBusy(
+                    f"Could not attach to Chrome on port {port}. Start it with "
+                    f"\"Open Chrome for harvesting\" first."
+                ) from exc
+            contexts = self._remote.contexts
+            self._ctx = contexts[0] if contexts else \
+                await self._remote.new_context()
+            self._attached = True
+            return self._ctx
+
+    async def docket_page(self):
+        """The open tab that is actually showing a docket, if any."""
+        ctx = self._ctx
+        if not ctx:
+            return None
+        best, best_score = None, 0
+        for page in ctx.pages:
+            if page.is_closed():
+                continue
+            try:
+                score = await page.evaluate(
+                    "() => [...document.querySelectorAll('button')]"
+                    ".filter(b => ['Document','Documents']"
+                    ".includes((b.textContent||'').trim())).length")
+            except Exception:
+                continue
+            if score > best_score:
+                best, best_score = page, score
+        if best:
+            return best
+        # No docket yet — fall back to whatever case-search tab is open.
+        for page in ctx.pages:
+            if not page.is_closed() and "casesearch" in (page.url or "").lower():
+                return page
+        return ctx.pages[0] if ctx.pages else None
+
     async def stop(self) -> None:
         async with self._lock:
-            if self._ctx:
+            await self._close_locked()
+
+    async def _close_locked(self) -> None:
+        if self._attached:
+            # Never close the user's browser — just let go of it.
+            self._ctx = None
+            self._attached = False
+            if self._remote:
                 try:
-                    await self._ctx.close()
+                    await self._remote.close()
                 finally:
-                    self._ctx = None
-            if self._pw:
-                try:
-                    await self._pw.stop()
-                finally:
-                    self._pw = None
+                    self._remote = None
+        elif self._ctx:
+            try:
+                await self._ctx.close()
+            finally:
+                self._ctx = None
+        if self._pw:
+            try:
+                await self._pw.stop()
+            finally:
+                self._pw = None
 
     @property
     def running(self) -> bool:
         return self._ctx is not None
+
+    @property
+    def attached(self) -> bool:
+        return self._attached
 
 
 # What the case page can be showing.

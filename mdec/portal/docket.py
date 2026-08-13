@@ -15,6 +15,10 @@ import hashlib
 
 # Returns [{section, file_date, name, comment, raw_text, button_index}]
 # button_index is null for entries with no downloadable document.
+# Fields are labelled in the page text, but the labels wrap across lines
+# ("Docket Entry" / "Name:" / "Order"), so line-based reading picks up the label
+# fragment instead of the value. Everything below works on whitespace-normalised
+# text and reads each value up to the next known label.
 PARSE_JS = r"""
 () => {
   const isDocBtn = (b) => {
@@ -23,9 +27,8 @@ PARSE_JS = r"""
   };
   const btns = Array.from(document.querySelectorAll('button')).filter(isDocBtn);
   btns.forEach((b, i) => b.setAttribute('data-mdec-idx', String(i)));
-  const btnIdx = new Map(btns.map((b, i) => [b, i]));
 
-  const headings = Array.from(document.querySelectorAll('h1,h2,h3,h4'))
+  const headings = Array.from(document.querySelectorAll('h1,h2,h3,h4,h5,h6'))
     .map(h => ({ h, text: (h.textContent || '').trim() }))
     .filter(x => x.text);
   const sectionFor = (el) => {
@@ -36,60 +39,125 @@ PARSE_JS = r"""
     return best;
   };
 
-  // Row containers: prefer <article> (MDEC uses them heavily), fall back to <tr>.
-  let rows = Array.from(document.querySelectorAll('article'));
-  if (rows.length < 5) rows = Array.from(document.querySelectorAll('tr'));
-
+  const flat = (el) => (el && el.innerText || '').replace(/\s+/g, ' ').trim();
   const dateRe = /\b\d{1,2}\/\d{1,2}\/\d{4}\b/;
-  const entries = [];
-  const claimed = new Set();
 
-  for (const r of rows) {
-    if (r.querySelector('article')) continue;            // container, not a leaf row
-    const text = (r.innerText || '').replace(/\s+\n/g, '\n').trim();
-    if (!text) continue;
-    const rowBtns = Array.from(r.querySelectorAll('button')).filter(b => btnIdx.has(b));
-    const dateMatch = text.match(dateRe);
-    if (!dateMatch && rowBtns.length === 0) continue;    // not a docket row
+  // Every label the portal uses on a docket card. A value runs until the next
+  // one starts, which is what makes extraction reliable without knowing the
+  // field order.
+  const LABELS = ['File Date', 'Docket Entry Name', 'Document Name', 'Comment',
+                  'Motion', 'Sequence', 'Create Initials', 'Create Date',
+                  'Update Initials', 'Update Date', 'Created Date', 'Filed By',
+                  'Party1', 'Party2', 'Party3', 'Reference Number', 'Status'];
+  const stop = LABELS.map(l => l.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'))
+                     .join('|') + '|Party\\d+';
+  const field = (text, label) => {
+    const re = new RegExp(label + '\\s*:\\s*(.*?)\\s*(?=(?:' + stop + ')\\s*:|$)', 'i');
+    const m = text.match(re);
+    return m ? m[1].trim() : '';
+  };
 
-    rowBtns.forEach(b => claimed.add(btnIdx.get(b)));
-    const lines = text.split('\n').map(s => s.trim())
-      .filter(s => s && s !== 'Document' && s !== 'Documents');
-    // Heuristic labeled-field extraction with graceful degradation to raw text.
-    const grab = (label) => {
-      const i = lines.findIndex(l => l.toLowerCase().startsWith(label));
-      if (i === -1) return '';
-      const inline = lines[i].slice(label.length).replace(/^:\s*/, '').trim();
-      return inline || (lines[i + 1] || '');
-    };
-    let file_date = grab('file date') || grab('created date') || (dateMatch ? dateMatch[0] : '');
-    let name = grab('docket entry') || grab('document name') || '';
-    let comment = grab('comment') || '';
-    if (!name) {
-      const cand = lines.filter(l => !dateRe.test(l) && !/^(file date|created date|comment)/i.test(l));
-      name = cand[0] || '';
-      if (!comment) comment = cand.slice(1).join(' | ');
+  // The row for a button is the nearest ancestor that carries real content.
+  // The button often sits in its own wrapper whose whole text is "DOCUMENTS",
+  // and treating that as the row is what produced files named "DOCUMENTS".
+  const rowFor = (btn) => {
+    const own = (btn.textContent || '').trim().length;
+    const tr = btn.closest('tr');
+    if (tr && flat(tr).length > own + 5) return tr;
+    let el = btn.parentElement;
+    while (el && el !== document.body) {
+      if (flat(el).length > own + 15) return el;
+      el = el.parentElement;
     }
-    entries.push({
-      section: sectionFor(r),
-      file_date, name, comment,
-      raw_text: text.slice(0, 2000),
-      button_index: rowBtns.length ? btnIdx.get(rowBtns[0]) : null,
-    });
-  }
+    return btn.closest('article') || btn.parentElement || btn;
+  };
 
-  // Safety net: any Document button not inside a recognized row still becomes an entry.
+  const parseRow = (row, text) => {
+    let file_date = field(text, 'File Date') || field(text, 'Created Date') ||
+                    field(text, 'Create Date');
+    let name = field(text, 'Docket Entry Name') || field(text, 'Document Name');
+    let comment = field(text, 'Comment');
+
+    if (!file_date) {
+      const m = text.match(dateRe);
+      file_date = m ? m[0] : '';
+    }
+    if (!name) {
+      // Table layouts (Court Scheduling) have no labels — use the columns,
+      // dropping the cell that only holds the button.
+      const cells = Array.from(row.querySelectorAll('td, th'))
+        .map(td => (td.innerText || '').replace(/\s+/g, ' ').trim())
+        .filter(t => t && !/^documents?$/i.test(t));
+      if (cells.length) {
+        name = cells[0];
+        if (!comment) comment = cells.slice(1).filter(c => !dateRe.test(c)).join(' · ');
+      }
+    }
+    if (!name) {
+      const cleaned = text.replace(/\b[Dd]ocuments?\b/g, '').trim();
+      name = cleaned.split(/\s{2,}|·/)[0].slice(0, 120) || 'Untitled entry';
+    }
+    // A date-only or label-only name is not a name.
+    if (/^(name|file date|comment)\s*:?$/i.test(name) || dateRe.test(name.trim())) {
+      const alt = text.replace(/^.*?Name\s*:\s*/i, '').trim();
+      if (alt && !/^\d/.test(alt)) name = alt.split(/\s*(?:Comment|Motion|Sequence)\s*:/i)[0].trim();
+    }
+
+    // The button's own label sits inside the row text and otherwise ends up in
+    // the filename ("… Postponement DOCUMENT.pdf").
+    // Case-insensitive: the button renders as "DOCUMENT" in caps.
+    const dropBtnLabel = (s) =>
+      s.replace(/[\s ]*\bdocuments?\b[\s ]*$/i, '')
+       .replace(/\s{2,}/g, ' ').trim();
+    name = dropBtnLabel(name);
+    comment = dropBtnLabel(comment);
+
+    // Dates arrive as M/D/YYYY here and D/M/YYYY with a time in some sections.
+    if (file_date) {
+      file_date = file_date.split(',')[0].trim();
+      const p = file_date.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
+      if (p && Number(p[1]) > 12 && Number(p[2]) <= 12) {
+        file_date = p[2] + '/' + p[1] + '/' + p[3];   // D/M/Y -> M/D/Y
+      }
+    }
+    return { file_date, name: name.slice(0, 300), comment: comment.slice(0, 600) };
+  };
+
+  const entries = [];
+  const seenRows = new Set();
+
+  // Document-bearing entries first, driven by the buttons themselves so every
+  // downloadable entry is represented exactly once.
   btns.forEach((b, i) => {
-    if (claimed.has(i)) return;
-    const holder = b.closest('article, tr, li, div') || b;
-    const text = ((holder.innerText || '').trim()).slice(0, 2000);
-    const dm = text.match(dateRe);
+    const row = rowFor(b);
+    seenRows.add(row);
+    const text = flat(row);
+    const f = parseRow(row, text);
     entries.push({
-      section: sectionFor(b), file_date: dm ? dm[0] : '',
-      name: text.split('\n')[0] || 'Unlabeled document entry',
-      comment: '', raw_text: text, button_index: i,
+      section: sectionFor(row),
+      file_date: f.file_date, name: f.name, comment: f.comment,
+      raw_text: text.slice(0, 2000),
+      button_index: i,
     });
   });
+
+  // Then docket rows that have no document, so the record is complete.
+  const cards = Array.from(document.querySelectorAll('article, tr'));
+  for (const r of cards) {
+    if (seenRows.has(r)) continue;
+    if (r.querySelector('article, tr')) continue;      // container, not a leaf
+    if (r.querySelector('button[data-mdec-idx]')) continue;
+    const text = flat(r);
+    if (!text || text.length < 12) continue;
+    if (!dateRe.test(text) && !/File Date|Docket Entry/i.test(text)) continue;
+    const f = parseRow(r, text);
+    entries.push({
+      section: sectionFor(r),
+      file_date: f.file_date, name: f.name, comment: f.comment,
+      raw_text: text.slice(0, 2000),
+      button_index: null,
+    });
+  }
 
   return entries;
 }

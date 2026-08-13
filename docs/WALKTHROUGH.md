@@ -41,18 +41,31 @@ files instead of downloading them again.
 ### Get to the docket yourself, then hand over
 
 The portal challenges automated browsing, so the app does not try to drive its
-way in. You take it to the docket; it takes over from there. Three steps, on the
-Dashboard under **Harvest the docket**:
+way in. You take it to the docket; it takes over from there. On the Dashboard,
+under **Harvest the docket**:
 
-**1. Open portal window.** A Chromium window opens. Sign in the normal way,
-answer any "Verification Required" challenge yourself, and navigate until your
-case's docket is on screen. The app never handles your password, and it will not
-answer a bot-detection challenge for you.
+**1. Open Chrome for harvesting.** This opens **your real Chrome** — not the
+app's bundled browser — on your case page.
 
-The browser profile persists, so you usually stay signed in across restarts.
-**Settings → Close portal window** shuts it down cleanly.
+That distinction is the whole point. The app's Playwright browser announces
+itself as automation, and the portal's bot detection serves it a "Verification
+Required" challenge that you often can't get past even as the rightful account
+holder. Real Chrome carries an ordinary fingerprint and loads the site normally.
 
-**2. Check readiness.** This verifies the three things that otherwise fail
+It uses a dedicated Chrome profile (`.chrome-harvest`), because Chrome refuses
+to open a debug port on your everyday profile. So **sign in once in that
+window** — the session persists there afterwards. Clear any verification
+challenge yourself; the app will never answer one for you.
+
+> While that window is open it listens on a local debug port, which lets any
+> program on your computer drive it. Close it when you're done. Your everyday
+> Chrome profile is never touched.
+
+**2. Attach.** The app takes hold of whichever tab is showing the docket. It
+never navigates that tab — navigating would discard the session you just
+established and can re-trigger the challenge.
+
+**3. Check readiness.** This verifies the three things that otherwise fail
 silently halfway through a long run:
 
 | Check | Why it matters |
@@ -63,7 +76,7 @@ silently halfway through a long run:
 
 **Harvest** stays disabled until all of them pass.
 
-**3. Harvest from this page.** The app works from the page you left open — it
+**4. Harvest.** The app works from the page you left open — it
 does not navigate, because navigating would discard the session you just
 established and can re-trigger the challenge.
 

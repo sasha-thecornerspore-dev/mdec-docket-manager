@@ -64,8 +64,39 @@ async def _check_throttle(frame) -> None:
         raise SessionRefresh()
 
 
+async def _click_and_watch(page, frame, button, watch_dir: Path,
+                           timeout_s: float = 60.0) -> Path:
+    """Click, then wait for a finished file to appear in `watch_dir`.
+
+    Used when driving the user's own Chrome: that browser does its own
+    downloading, so there is no Playwright download event to await — we watch
+    where we told Chrome to put the files instead.
+    """
+    watch_dir = Path(watch_dir)
+    watch_dir.mkdir(parents=True, exist_ok=True)
+    before = {p.name for p in watch_dir.iterdir() if p.is_file()}
+    await button.click()
+
+    deadline = asyncio.get_running_loop().time() + timeout_s
+    while asyncio.get_running_loop().time() < deadline:
+        await frame.wait_for_timeout(250)
+        current = [p for p in watch_dir.iterdir() if p.is_file()]
+        fresh = [p for p in current if p.name not in before]
+        # .crdownload means Chrome is still writing it.
+        done = [p for p in fresh if p.suffix.lower() != ".crdownload"]
+        if done and not any(p.suffix.lower() == ".crdownload" for p in fresh):
+            newest = max(done, key=lambda p: p.stat().st_mtime)
+            size = newest.stat().st_size
+            await frame.wait_for_timeout(200)      # let the last block flush
+            if newest.stat().st_size == size and size > 0:
+                return newest
+    raise RuntimeError("no file appeared in the download folder within "
+                       f"{int(timeout_s)}s")
+
+
 async def download_entry(page, button_index: int, dest_dir: Path,
-                         breathing_ms: int = 300, frame=None) -> EntryDownload:
+                         breathing_ms: int = 300, frame=None,
+                         watch_dir: Path | None = None) -> EntryDownload:
     """Open one entry's modal, download every file in it, close, pace.
 
     `frame` is where the elements live (the docket can be inside an iframe);
@@ -110,12 +141,19 @@ async def download_entry(page, button_index: int, dest_dir: Path,
         label = (await b.get_attribute("aria-label")) or ""
         title = label.replace("Download document", "").strip()
         try:
-            async with page.expect_download(timeout=30000) as dl_info:
-                await b.click()
-            download = await dl_info.value
-            suggested = download.suggested_filename or f"{title or 'document'}.pdf"
-            tmp_path = dest_dir / f"__incoming__{button_index}_{len(result.files)}.pdf"
-            await download.save_as(str(tmp_path))
+            if watch_dir is not None:
+                landed = await _click_and_watch(page, frame, b, watch_dir)
+                tmp_path = dest_dir / f"__incoming__{button_index}_{len(result.files)}.pdf"
+                dest_dir.mkdir(parents=True, exist_ok=True)
+                landed.replace(tmp_path)
+                suggested = landed.name
+            else:
+                async with page.expect_download(timeout=30000) as dl_info:
+                    await b.click()
+                download = await dl_info.value
+                suggested = download.suggested_filename or f"{title or 'document'}.pdf"
+                tmp_path = dest_dir / f"__incoming__{button_index}_{len(result.files)}.pdf"
+                await download.save_as(str(tmp_path))
             size = tmp_path.stat().st_size
             if size == 0:
                 raise RuntimeError("zero-byte download")
@@ -144,7 +182,8 @@ async def download_entry(page, button_index: int, dest_dir: Path,
 async def download_many(page, button_indices: list[int], dest_dir: Path,
                         breathing_ms: int = 300, batch_size: int = 10,
                         batch_pause_s: float = 3.0, on_progress=None,
-                        reparse=None, frame=None) -> list[EntryDownload]:
+                        reparse=None, frame=None,
+                        watch_dir: Path | None = None) -> list[EntryDownload]:
     """Download a list of entries with batch pacing and throttle recovery.
 
     `reparse` is an async callable that re-parses the page (re-tagging buttons)
@@ -158,7 +197,7 @@ async def download_many(page, button_indices: list[int], dest_dir: Path,
         while True:
             try:
                 res = await download_entry(page, idx, dest_dir, breathing_ms,
-                                           frame=frame)
+                                           frame=frame, watch_dir=watch_dir)
                 break
             except SessionRefresh:
                 attempts += 1
@@ -173,7 +212,7 @@ async def download_many(page, button_indices: list[int], dest_dir: Path,
         if res.status == "error" and attempts == 0:
             # one retry for transient failures (dropped download etc.)
             retry = await download_entry(page, idx, dest_dir, breathing_ms,
-                                         frame=frame)
+                                         frame=frame, watch_dir=watch_dir)
             if retry.status == "ok" and retry.files:
                 res = retry
         results.append(res)

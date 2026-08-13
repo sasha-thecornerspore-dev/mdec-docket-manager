@@ -110,6 +110,7 @@ async def api_status():
         "schedule": cfg["schedule"],
         "login_mode": cfg["login"]["mode"],
         "browser_running": br.browser.running,
+        "browser_attached": br.browser.attached,
         "portal_state": monitor.last_portal_state,
         "runs": db.list_runs(5),
     }
@@ -364,6 +365,18 @@ async def api_open_portal():
 @app.post("/api/actions/check-now")
 async def api_check_now(case_id: int | None = None):
     return await monitor.run_check("manual", case_id)
+
+
+@app.post("/api/actions/start-chrome")
+async def api_start_chrome(case_id: int | None = None):
+    """Open the user's real Chrome with a debug port, on their case page."""
+    return await monitor.start_user_chrome(case_id)
+
+
+@app.post("/api/actions/attach-chrome")
+async def api_attach_chrome(case_id: int | None = None):
+    """Attach to that Chrome and check whether a docket is on screen."""
+    return await monitor.attach_chrome(case_id)
 
 
 @app.post("/api/actions/preflight")

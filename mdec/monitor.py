@@ -145,12 +145,15 @@ class Monitor:
 
             # Settle downloads before a single click: a permission prompt or an
             # unwritable folder discovered mid-run costs the whole batch.
-            ctx = await br.browser.start()
-            dl = await br.prepare_downloads(ctx, page, folder)
+            attached = br.browser.attached
+            ctx = br.browser._ctx if attached else await br.browser.start()
+            staging = self._staging_dir(folder) if attached else None
+            dl = await br.prepare_downloads(ctx, page, staging or folder)
             if not dl["folder_ready"]:
                 db.finish_run(run_id, "error", log=dl["detail"])
                 return {"ok": False, "message": dl["detail"]}
-            log(f"Downloads → {folder}")
+            log(f"Downloads → {staging or folder}"
+                + (" (your Chrome)" if attached else ""))
 
             log("Parsing docket")
             entries = await docket.parse_page(page)
@@ -234,6 +237,7 @@ class Monitor:
                     batch_pause_s=dl_cfg["batch_pause_s"],
                     on_progress=progress, reparse=reparse,
                     frame=await docket.content_frame(page),
+                    watch_dir=staging,
                 )
                 for entry, res in zip(fresh, results):
                     if res.status in ("view_only", "no_modal"):
@@ -363,6 +367,50 @@ class Monitor:
                 "yet. Sign in there, navigate to your case to confirm you can "
                 "see the docket, then come back and click \"Check now\".")
 
+    @staticmethod
+    def _staging_dir(folder: Path) -> Path:
+        """Where an attached Chrome drops files before we name them.
+
+        A subfolder of the case folder, so a partial run leaves everything in
+        one place and nothing lands in the user's own Downloads.
+        """
+        d = Path(folder) / ".incoming"
+        d.mkdir(parents=True, exist_ok=True)
+        return d
+
+    async def start_user_chrome(self, case_id: int | None = None) -> dict:
+        """Open the user's real Chrome with a debug port, on their case page."""
+        case = self._resolve_case(case_id)
+        url = config.case_url(case["case_number"]) if case else None
+        loop = asyncio.get_running_loop()
+        return await loop.run_in_executor(
+            None, lambda: br.start_user_chrome(url=url))
+
+    async def attach_chrome(self, case_id: int | None = None) -> dict:
+        """Attach to that Chrome and report whether a docket is on screen."""
+        try:
+            await br.browser.attach()
+            page = await br.browser.page()
+        except br.BrowserBusy as exc:
+            return {"ok": False, "message": str(exc)}
+        except Exception as exc:
+            return {"ok": False, "message": f"{type(exc).__name__}: {exc}"}
+
+        state, signals = await br.page_state(page)
+        self.last_portal_state = state
+        ok = state == br.READY
+        return {
+            "ok": ok, "state": state, "url": (page.url or "")[:200],
+            "message": (
+                f"Attached — the docket is on screen "
+                f"({signals.get('docButtons', 0)} document buttons). "
+                f"Run \"Check readiness\" next."
+                if ok else
+                f"Attached to Chrome, but that tab isn't showing a docket "
+                f"(state: {state}). Sign in and open your case in that Chrome "
+                f"window, then attach again."),
+        }
+
     async def preflight(self, case_id: int | None = None) -> dict:
         """Check everything the download loop depends on, before it starts.
 
@@ -381,11 +429,14 @@ class Monitor:
         try:
             br.browser.set_downloads_path(folder)
             page = await br.browser.page()
-            ctx = await br.browser.start()
+            ctx = br.browser._ctx if br.browser.attached else await br.browser.start()
         except (br.BrowserMissing, br.BrowserBusy) as exc:
             return {"ok": False, "message": str(exc)}
 
-        dl = await br.prepare_downloads(ctx, page, folder)
+        # Attached to real Chrome, that browser does its own downloading, so
+        # point it at a staging folder we can watch.
+        target = self._staging_dir(folder) if br.browser.attached else folder
+        dl = await br.prepare_downloads(ctx, page, target)
         checks.append({
             "name": "Download folder writable",
             "ok": dl["folder_ready"],

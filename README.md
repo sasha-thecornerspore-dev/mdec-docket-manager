@@ -81,14 +81,15 @@ Open the app from its icon, then:
 
 1. **Settings → Cases** — add your case number (e.g. `C-01-CV-24-001234`) and
    pick a document folder with **Browse…**. Add as many cases as you track.
-2. **Open portal window** — sign in yourself, clear any verification challenge,
-   and navigate until the docket is on screen. The app never handles your
-   password and never answers a bot challenge.
-3. **Check readiness** — confirms the folder is writable, multiple downloads are
+2. **Open Chrome for harvesting** — opens **your real Chrome** on your case.
+   Sign in there and clear any verification. The portal trusts this browser; it
+   does not trust the app's bundled one, which is why signing in there can fail.
+3. **Attach** — the app takes hold of that tab and never navigates it, so your
+   session and cleared challenge survive.
+4. **Check readiness** — confirms the folder is writable, multiple downloads are
    pre-approved, and the docket actually parses. Harvest stays locked until all
    three pass.
-4. **Harvest from this page** — downloads everything not already on disk, paced,
-   working from the page you left open rather than navigating.
+5. **Harvest** — downloads everything not already on disk, paced.
 
 Everything else — OCR, RAG export, analysis, scheduling — is optional and off by
 default.
@@ -149,6 +150,13 @@ The app detects the challenge, names it, and stops. It does **not** answer it,
 and it deliberately contains no fingerprint spoofing or other evasion — that is
 the thing the check exists to prevent. If you see the challenge, complete it
 yourself in your normal browser; the flag is per-connection and usually clears.
+
+**The workable route is to stop using the app's browser at all.** *Open Chrome
+for harvesting* drives your real Chrome instead — an ordinary browser with an
+ordinary fingerprint, which the portal serves normally. You sign in there, and
+the app attaches to that tab rather than launching a look-alike the site
+distrusts. No spoofing is involved: it is simply your own browser, doing what
+you do in it anyway.
 
 **Scheduled checks ship disabled** for this reason. Turn them on only after a
 manual check has actually read your docket.

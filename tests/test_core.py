@@ -75,6 +75,27 @@ def test_unknown_date_is_marked_not_guessed():
         "0007_XXXXXXXX_")
 
 
+def test_date_stamp_drops_a_trailing_time():
+    """Some portal sections render 'Created Date' with a time appended."""
+    assert renamer.date_stamp("10/09/2025, 15:06:37") == "20251009"
+
+
+def test_date_stamp_reads_an_impossible_month_as_day_first():
+    """'29/09/2025' is day-first; throwing it away would lose the date."""
+    assert renamer.date_stamp("29/09/2025, 15:06:37") == "20250929"
+    assert renamer.date_stamp("29/09/2025") == "20250929"
+
+
+def test_date_stamp_keeps_month_first_when_ambiguous():
+    """08/07 stays August 7th — only an impossible month triggers the swap."""
+    assert renamer.date_stamp("08/07/2025") == "20250807"
+
+
+def test_date_stamp_still_rejects_real_nonsense():
+    for bad in ("", "not a date", "13/45/2024", "2025-10-09"):
+        assert renamer.date_stamp(bad) == "XXXXXXXX"
+
+
 def test_multi_file_entries_get_part_suffixes():
     assert renamer.catalog_name(555, "1/2/2024", "Exhibit", part=3,
                                 total_parts=14) == \
