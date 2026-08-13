@@ -716,6 +716,91 @@ def test_a_challenge_frame_does_not_block_an_already_loaded_docket():
     assert asyncio.run(br.page_state(P()))[0] == br.READY
 
 
+def test_multiple_downloads_are_pre_approved_in_the_profile(dump):
+    """The field-notes lesson, automated: Chrome blocks the 2nd and later
+    automatic downloads until someone answers a prompt, and mid-run there is
+    nobody to answer it."""
+    import json as _json
+    from mdec.portal import browser as br
+
+    assert br.allow_automatic_downloads(str(dump)) is True
+    prefs = _json.loads((dump / "Default" / "Preferences").read_text(encoding="utf-8"))
+    assert prefs["profile"]["default_content_setting_values"]["automatic_downloads"] == 1
+    assert prefs["download"]["prompt_for_download"] is False
+
+
+def test_pre_approval_preserves_existing_profile_settings(dump):
+    """A real profile holds the session; clobbering it would sign the user out."""
+    import json as _json
+    from mdec.portal import browser as br
+
+    prefs_path = dump / "Default" / "Preferences"
+    prefs_path.parent.mkdir(parents=True)
+    prefs_path.write_text(_json.dumps({
+        "profile": {"name": "keep me",
+                    "default_content_setting_values": {"popups": 2}},
+        "credentials_enable_service": False,
+    }), encoding="utf-8")
+
+    assert br.allow_automatic_downloads(str(dump)) is True
+    prefs = _json.loads(prefs_path.read_text(encoding="utf-8"))
+    assert prefs["profile"]["name"] == "keep me"
+    assert prefs["profile"]["default_content_setting_values"]["popups"] == 2
+    assert prefs["profile"]["default_content_setting_values"]["automatic_downloads"] == 1
+    assert prefs["credentials_enable_service"] is False
+
+
+def test_pre_approval_survives_a_corrupt_preferences_file(dump):
+    from mdec.portal import browser as br
+    prefs_path = dump / "Default" / "Preferences"
+    prefs_path.parent.mkdir(parents=True)
+    prefs_path.write_text("{not valid json", encoding="utf-8")
+    assert br.allow_automatic_downloads(str(dump)) is True
+
+
+def test_prepare_downloads_reports_an_unwritable_folder():
+    """Better to fail before the first click than 400 documents in."""
+    import asyncio
+    from mdec.portal import browser as br
+
+    class Ctx:
+        async def new_cdp_session(self, _page):
+            raise AssertionError("must not reach CDP when the folder is bad")
+
+    bad = "Z:/definitely/not/writable/mdec"
+    r = asyncio.run(br.prepare_downloads(Ctx(), object(), bad))
+    assert r["folder_ready"] is False
+    assert "Cannot write" in r["detail"]
+
+
+def test_prepare_downloads_sets_the_path_and_survives_cdp_refusal(dump):
+    import asyncio
+    from mdec.portal import browser as br
+
+    sent = {}
+
+    class Ctx:
+        async def new_cdp_session(self, _page):
+            class S:
+                async def send(_self, method, params):
+                    sent["method"] = method
+                    sent["params"] = params
+            return S()
+
+    r = asyncio.run(br.prepare_downloads(Ctx(), object(), dump))
+    assert r["folder_ready"] and r["permission_set"]
+    assert sent["method"] == "Browser.setDownloadBehavior"
+    assert sent["params"]["behavior"] == "allow"
+    assert sent["params"]["downloadPath"] == str(dump)
+
+    class Hostile:
+        async def new_cdp_session(self, _page):
+            raise RuntimeError("CDP unavailable")
+
+    r2 = asyncio.run(br.prepare_downloads(Hostile(), object(), dump))
+    assert r2["folder_ready"] is True and r2["permission_set"] is False
+
+
 def test_profile_lock_errors_are_recognized():
     from mdec.portal import browser as br
     assert br._is_profile_locked(

@@ -9,8 +9,10 @@ and attach mode requires them to type their password themselves.
 from __future__ import annotations
 
 import asyncio
+import json
 import os
 import subprocess
+from pathlib import Path
 
 from .. import config
 
@@ -31,6 +33,70 @@ def _is_profile_locked(exc: BaseException) -> bool:
     text = str(exc).lower()
     return ("already in use" in text or
             "opening in existing browser session" in text)
+
+
+def allow_automatic_downloads(profile_dir: str) -> bool:
+    """Pre-approve multiple automatic downloads in the browser profile.
+
+    This is the "get download permission first" lesson from the reference
+    harvest, done up front instead of by hand: Chrome blocks the second and
+    later automatic downloads from a page until the user answers a prompt, and
+    during an unattended run nobody is there to answer it.
+
+    Writes Chrome's own preference into the persistent profile, so it is in
+    force from the moment the window opens.
+    """
+    prefs_path = Path(profile_dir) / "Default" / "Preferences"
+    try:
+        prefs_path.parent.mkdir(parents=True, exist_ok=True)
+        prefs = {}
+        if prefs_path.is_file():
+            try:
+                prefs = json.loads(prefs_path.read_text(encoding="utf-8"))
+            except (json.JSONDecodeError, OSError):
+                prefs = {}          # a corrupt profile shouldn't block the run
+        profile = prefs.setdefault("profile", {})
+        settings = profile.setdefault("default_content_setting_values", {})
+        settings["automatic_downloads"] = 1        # 1 = allow, 2 = block
+        # Don't ask where to save each file, either.
+        prefs.setdefault("download", {})["prompt_for_download"] = False
+        prefs_path.write_text(json.dumps(prefs), encoding="utf-8")
+        return True
+    except OSError:
+        return False
+
+
+async def prepare_downloads(context, page, folder) -> dict:
+    """Point the browser's downloads at `folder` and confirm it can write there.
+
+    Belt and braces with Playwright's own download handling: if anything ever
+    slips past the interception, it still lands somewhere we control rather
+    than in the user's Downloads folder.
+    """
+    result = {"folder": str(folder), "folder_ready": False,
+              "permission_set": False, "detail": ""}
+    try:
+        Path(folder).mkdir(parents=True, exist_ok=True)
+        probe = Path(folder) / ".write-test"
+        probe.write_text("ok", encoding="utf-8")
+        probe.unlink()
+        result["folder_ready"] = True
+    except OSError as exc:
+        result["detail"] = f"Cannot write to {folder}: {exc}"
+        return result
+
+    try:
+        cdp = await context.new_cdp_session(page)
+        await cdp.send("Browser.setDownloadBehavior", {
+            "behavior": "allow",
+            "downloadPath": str(folder),
+            "eventsEnabled": True,
+        })
+        result["permission_set"] = True
+    except Exception as exc:
+        # Not fatal: Playwright still intercepts downloads itself.
+        result["detail"] = f"Download behavior not set via CDP ({exc})."
+    return result
 
 
 def close_orphaned_browsers(profile_dir: str) -> int:
@@ -115,12 +181,27 @@ class Browser:
             return self._ctx
 
     async def _launch(self):
+        # Grant multiple-downloads before the window exists. Chrome asks
+        # "Download multiple files?" the second time a page downloads without a
+        # click, and a prompt that appears mid-run silently drops every file
+        # behind it.
+        allow_automatic_downloads(self.profile_dir)
         return await self._pw.chromium.launch_persistent_context(
             self.profile_dir,
             headless=False,
             accept_downloads=True,
+            downloads_path=self._downloads_path,
             viewport={"width": 1400, "height": 950},
         )
+
+    _downloads_path: str | None = None
+
+    def set_downloads_path(self, path) -> None:
+        """Where Chromium spools downloads before we rename them into place.
+
+        Only takes effect on the next launch, so it is set before starting.
+        """
+        self._downloads_path = str(path) if path else None
 
     async def _teardown_pw(self) -> None:
         if self._pw:

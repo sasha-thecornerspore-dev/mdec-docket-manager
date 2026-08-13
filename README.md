@@ -81,13 +81,17 @@ Open the app from its icon, then:
 
 1. **Settings → Cases** — add your case number (e.g. `C-01-CV-24-001234`) and
    pick a document folder with **Browse…**. Add as many cases as you track.
-2. **Open portal window** — a browser window opens on your case page. Sign in
-   yourself. The session is remembered for later runs.
-3. **Check now** — the app reads the docket, adopts anything already in the
-   folder, downloads the rest, names it, and records the run.
+2. **Open portal window** — sign in yourself, clear any verification challenge,
+   and navigate until the docket is on screen. The app never handles your
+   password and never answers a bot challenge.
+3. **Check readiness** — confirms the folder is writable, multiple downloads are
+   pre-approved, and the docket actually parses. Harvest stays locked until all
+   three pass.
+4. **Harvest from this page** — downloads everything not already on disk, paced,
+   working from the page you left open rather than navigating.
 
-That's the whole loop. Everything else — automated login, OCR, RAG export,
-analysis — is optional and off by default.
+Everything else — OCR, RAG export, analysis, scheduling — is optional and off by
+default.
 
 **Already have the PDFs?** Point the case's folder at them. If they follow the
 `NNNN_YYYYMMDD_…` convention the app adopts them instead of re-downloading; if

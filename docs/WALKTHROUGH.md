@@ -38,27 +38,37 @@ If you point the folder at an archive you already have, see
 [section 4](#4-importing-an-archive-you-already-have) — the app will adopt those
 files instead of downloading them again.
 
-### Sign in
+### Get to the docket yourself, then hand over
 
-Click **Open portal window** in the top bar. A Chromium window opens on your case
-page. Sign in there yourself, the normal way, including whatever verification the
-portal asks for.
+The portal challenges automated browsing, so the app does not try to drive its
+way in. You take it to the docket; it takes over from there. Three steps, on the
+Dashboard under **Harvest the docket**:
 
-This is *attach mode*, the default and the recommended setup: the app never
-handles your password, and the browser profile persists, so you usually stay
-signed in across restarts. When the session does expire, a check finishes with a
-`warning` status telling you to sign in again.
+**1. Open portal window.** A Chromium window opens. Sign in the normal way,
+answer any "Verification Required" challenge yourself, and navigate until your
+case's docket is on screen. The app never handles your password, and it will not
+answer a bot-detection challenge for you.
 
-You can leave the window open or close it — the session lives in the profile, not
-the window. **Settings → Close browser window** shuts it down cleanly.
+The browser profile persists, so you usually stay signed in across restarts.
+**Settings → Close portal window** shuts it down cleanly.
 
-### First check
+**2. Check readiness.** This verifies the three things that otherwise fail
+silently halfway through a long run:
 
-Click **Check now**.
+| Check | Why it matters |
+|---|---|
+| Download folder writable | A folder it can't write to loses every file |
+| Multiple downloads pre-approved | Chrome blocks the 2nd and later automatic downloads behind a prompt; mid-run, nobody answers it |
+| Browser is on the docket | Confirms the page really parses, and reports how many entries and documents it can see |
 
-The app reads every docket entry, records them, downloads the documents, names
-them, and logs the run. The state chip next to the button narrates progress
-(`parsing docket`, `downloaded 14/62`, …).
+**Harvest** stays disabled until all of them pass.
+
+**3. Harvest from this page.** The app works from the page you left open — it
+does not navigate, because navigating would discard the session you just
+established and can re-trigger the challenge.
+
+It downloads every entry that has no file yet, names them, and logs the run. The
+state chip narrates progress (`Downloaded 14/62 …`).
 
 **On a case with hundreds of documents the first check takes a while** — roughly
 20 minutes per 1,000 documents, because it deliberately waits 300 ms between

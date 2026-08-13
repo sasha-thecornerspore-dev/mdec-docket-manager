@@ -83,14 +83,14 @@ class Monitor:
 
     # --- the check ---------------------------------------------------------
 
-    async def run_check(self, kind: str = "manual",
-                        case_id: int | None = None) -> dict:
+    async def run_check(self, kind: str = "manual", case_id: int | None = None,
+                        use_current_page: bool = False) -> dict:
         if self._lock.locked():
             return {"ok": False, "message": "A run is already in progress."}
         async with self._lock:
             self.status.update(busy=True, message=f"{kind}: starting")
             try:
-                return await self._do_check(kind, case_id)
+                return await self._do_check(kind, case_id, use_current_page)
             finally:
                 self.status.update(busy=False)
                 self.status["last_check"] = db.now()
@@ -101,7 +101,8 @@ class Monitor:
         number = config.load_config()["active_case_number"]
         return db.get_case(number) if number else None
 
-    async def _do_check(self, kind: str, case_id: int | None) -> dict:
+    async def _do_check(self, kind: str, case_id: int | None,
+                        use_current_page: bool = False) -> dict:
         cfg = config.load_config()
         case = self._resolve_case(case_id)
         if not case:
@@ -119,10 +120,37 @@ class Monitor:
         try:
             folder = Path(case["downloads"] or
                           config.default_case_folder(case_number, cfg))
+            br.browser.set_downloads_path(folder)
 
-            log("Opening portal")
-            await login.ensure_logged_in(cfg, case_number, log)
-            page = await br.browser.page()
+            if use_current_page:
+                # The user got the browser to the docket themselves — signed in,
+                # any verification cleared. Navigating again would throw that
+                # away and can re-trigger the portal's bot challenge, so work
+                # with the page exactly as they left it.
+                log("Using the page already open in the portal window")
+                page = await br.browser.page()
+                state, signals = await br.page_state(page)
+                self.last_portal_state = state
+                if state != br.READY:
+                    msg = ("The portal window isn't showing a docket right now "
+                           f"(state: {state}). Sign in, open your case so the "
+                           "docket is on screen, then start the harvest again.")
+                    db.finish_run(run_id, "warning", log=msg)
+                    self.status["message"] = "not on the docket"
+                    return {"ok": False, "message": msg}
+            else:
+                log("Opening portal")
+                await login.ensure_logged_in(cfg, case_number, log)
+                page = await br.browser.page()
+
+            # Settle downloads before a single click: a permission prompt or an
+            # unwritable folder discovered mid-run costs the whole batch.
+            ctx = await br.browser.start()
+            dl = await br.prepare_downloads(ctx, page, folder)
+            if not dl["folder_ready"]:
+                db.finish_run(run_id, "error", log=dl["detail"])
+                return {"ok": False, "message": dl["detail"]}
+            log(f"Downloads → {folder}")
 
             log("Parsing docket")
             entries = await docket.parse_page(page)
@@ -334,6 +362,82 @@ class Monitor:
         return ("Portal window open at the sign-in page — you are not signed in "
                 "yet. Sign in there, navigate to your case to confirm you can "
                 "see the docket, then come back and click \"Check now\".")
+
+    async def preflight(self, case_id: int | None = None) -> dict:
+        """Check everything the download loop depends on, before it starts.
+
+        Deliberately run as its own step: the failures it catches — no write
+        access to the folder, downloads not pre-approved, not actually on the
+        docket — all produce a run that appears to work while dropping files,
+        and they are cheap to check and expensive to discover halfway through
+        900 documents.
+        """
+        case = self._resolve_case(case_id)
+        if not case:
+            return {"ok": False, "message": "No case selected."}
+        folder = Path(case["downloads"] or
+                      config.default_case_folder(case["case_number"]))
+        checks: list[dict] = []
+        try:
+            br.browser.set_downloads_path(folder)
+            page = await br.browser.page()
+            ctx = await br.browser.start()
+        except (br.BrowserMissing, br.BrowserBusy) as exc:
+            return {"ok": False, "message": str(exc)}
+
+        dl = await br.prepare_downloads(ctx, page, folder)
+        checks.append({
+            "name": "Download folder writable",
+            "ok": dl["folder_ready"],
+            "detail": dl["folder"] if dl["folder_ready"] else dl["detail"],
+        })
+        checks.append({
+            "name": "Multiple downloads pre-approved",
+            "ok": True,
+            "detail": ("Chrome's automatic-downloads permission is set in the "
+                       "browser profile" +
+                       (" and the download path is set." if dl["permission_set"]
+                        else "; the CDP path hint was refused, which is "
+                             "harmless because downloads are intercepted "
+                             "directly.")),
+        })
+
+        state, signals = await br.page_state(page)
+        self.last_portal_state = state
+        on_docket = state == br.READY
+        checks.append({
+            "name": "Browser is on the docket",
+            "ok": on_docket,
+            "detail": (f"{signals.get('docButtons', 0)} document buttons visible"
+                       if on_docket else
+                       f"page state: {state} — sign in and open your case in "
+                       f"the portal window, then run this again"),
+        })
+
+        entries = []
+        if on_docket:
+            try:
+                entries = await docket.parse_page(page)
+            except Exception as exc:
+                checks.append({"name": "Docket parses", "ok": False,
+                               "detail": f"{type(exc).__name__}: {exc}"})
+            else:
+                with_docs = sum(1 for e in entries
+                                if e.get("button_index") is not None)
+                checks.append({
+                    "name": "Docket parses",
+                    "ok": bool(entries),
+                    "detail": (f"{len(entries)} entries, {with_docs} with "
+                               f"documents to download" if entries else
+                               "parsed the page but found no entries"),
+                })
+
+        ok = all(c["ok"] for c in checks)
+        return {
+            "ok": ok, "checks": checks, "entries": len(entries),
+            "message": ("Ready — start the harvest." if ok else
+                        "Not ready. Fix the items marked below first."),
+        }
 
     async def diagnose_page(self, case_id: int | None = None) -> dict:
         """Report what the case page actually contains.

@@ -718,6 +718,53 @@ $('#btnInstallBrowser').addEventListener('click', async () => {
   finally { b.disabled = false; b.textContent = 'Download browser (~130 MB)'; }
 });
 
+/* --- preflight + harvest-from-here ------------------------------------- */
+
+function renderPreflight(r) {
+  const rows = (r.checks || []).map(c => `
+    <div class="r-row ${c.ok ? 'r-rename' : 'r-missing'}">
+      <span>${c.ok ? '✓' : '✗'}</span>
+      <span>${esc(c.name)}</span>
+      <span>${esc(c.detail || '')}</span>
+    </div>`).join('');
+  $('#preflightOut').innerHTML =
+    `<p class="hint"><strong>${esc(r.message)}</strong></p>${rows}`;
+  // Only let the harvest start once every prerequisite actually passed.
+  $('#btnHarvest').disabled = !r.ok;
+}
+
+$('#btnPreflight').addEventListener('click', async () => {
+  const b = $('#btnPreflight');
+  b.disabled = true; b.textContent = 'Checking…';
+  try {
+    const r = await api('/actions/preflight', { method: 'POST' });
+    renderPreflight(r);
+    toast(r.message, !r.ok);
+  } catch (e) { toast(e.message, true); }
+  finally { b.disabled = false; b.textContent = 'Check readiness'; }
+});
+
+$('#btnHarvest').addEventListener('click', async () => {
+  const b = $('#btnHarvest');
+  if (!confirm('Start downloading?\n\nThis works through every docket entry ' +
+               'that has no file yet, pausing between documents so the portal ' +
+               'is not hammered. On a large docket it takes roughly 20 minutes ' +
+               'per 1,000 documents.\n\nLeave the portal window alone while it ' +
+               'runs.')) return;
+  b.disabled = true; b.textContent = 'Harvesting… (watch Activity)';
+  try {
+    const r = await api('/actions/harvest-here', { method: 'POST' });
+    toast(r.ok
+      ? `Done: ${r.new_entries} new ${r.new_entries === 1 ? 'entry' : 'entries'}, ` +
+        `${r.new_documents} downloaded` +
+        (r.adopted ? `, ${r.adopted} adopted from disk` : '') +
+        (r.warnings?.length ? ` — ${r.warnings.length} warning(s), see Activity.` : '.')
+      : r.message, !r.ok);
+    await refreshAll();
+  } catch (e) { toast(e.message, true); }
+  finally { b.textContent = 'Harvest from this page'; b.disabled = false; }
+});
+
 $('#btnDiagnose').addEventListener('click', async () => {
   const b = $('#btnDiagnose');
   b.disabled = true; b.textContent = 'Looking at the page…';

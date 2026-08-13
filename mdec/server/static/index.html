@@ -44,6 +44,26 @@
   <!-- DASHBOARD ------------------------------------------------------ -->
   <section class="panel is-active" id="panel-dashboard" role="tabpanel">
     <div class="tally" id="tally"></div>
+    <div class="card harvest">
+      <h2 class="card-title">Harvest the docket</h2>
+      <p class="hint">The portal challenges automated browsing, so the reliable
+        route is to get there yourself and then hand over. Downloads and the
+        folder are settled before any clicking starts.</p>
+      <ol class="steps">
+        <li><strong>Open portal window</strong> — sign in, clear any
+          verification, and open your case so the docket is on screen.</li>
+        <li><strong>Check readiness</strong> — confirms the folder is writable,
+          multiple downloads are pre-approved, and the docket parses.</li>
+        <li><strong>Harvest from this page</strong> — downloads everything not
+          already on disk, paced, without navigating away.</li>
+      </ol>
+      <div class="toolbar">
+        <button id="btnPreflight" class="btn">Check readiness</button>
+        <button id="btnHarvest" class="btn btn-primary" disabled>Harvest from this page</button>
+      </div>
+      <div id="preflightOut" class="repair-out"></div>
+    </div>
+
     <div class="split">
       <div class="card">
         <h2 class="card-title">Recent activity</h2>

@@ -454,6 +454,14 @@ main { padding: var(--gut) 1.5rem 4rem; max-width: 1500px; }
 .folder-picker .input { flex: 1 1 auto; }
 .folder-picker .btn { flex: none; }
 
+.harvest { border-left: 3px solid var(--stamp); }
+.steps {
+  margin: 0 0 1rem; padding-left: 1.4rem;
+  font-family: var(--body); font-size: 0.9rem;
+}
+.steps li { margin-bottom: 0.35rem; }
+.steps strong { font-family: var(--display); letter-spacing: 0.02em; }
+
 .folder-line {
   display: flex; align-items: center; gap: 0.6rem; flex-wrap: wrap;
   margin: 0 0 0.8rem;

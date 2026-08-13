@@ -366,6 +366,18 @@ async def api_check_now(case_id: int | None = None):
     return await monitor.run_check("manual", case_id)
 
 
+@app.post("/api/actions/preflight")
+async def api_preflight(case_id: int | None = None):
+    """Verify folder, download permission, and that the docket is on screen."""
+    return await monitor.preflight(case_id)
+
+
+@app.post("/api/actions/harvest-here")
+async def api_harvest_here(case_id: int | None = None):
+    """Harvest from the page the user already has open, without navigating."""
+    return await monitor.run_check("harvest", case_id, use_current_page=True)
+
+
 @app.post("/api/actions/check-all")
 async def api_check_all():
     return await monitor.run_all_cases()
