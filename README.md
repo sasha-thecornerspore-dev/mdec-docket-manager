@@ -130,22 +130,35 @@ Set **Settings → Claude analysis → Backend**:
   Windows Credential Manager.
 - **Auto** (default) — uses the API key if one is stored, otherwise the CLI.
 
-## Before you rely on it: the portal may refuse automation
+## Read this before you rely on the automatic downloading
 
 As of August 2026 the Maryland portal ("Case Portal 1.1") sits behind **DataDome
-bot detection**, and serves a CAPTCHA to the automated browser instead of the
-case page. The app detects this and says so plainly — it does **not** attempt to
-answer or evade the challenge.
+bot detection**. It serves a "Verification Required" challenge to the automated
+browser instead of the case page, citing *automated activity* and *use of
+developer or inspection tools* — Playwright drives Chromium over the DevTools
+protocol, which is exactly what that fingerprints.
 
-If the challenge appears once, complete it yourself in the portal window and
-carry on. If it returns on every check, the portal is refusing automated
-browsing from your connection, and no amount of configuration will change that.
-The archive features still work: download through the portal by hand into the
-case folder, and use **Adopt files** to bring everything into the app with
-correct names, notes, OCR, and analysis.
+**This is detection by signature, not by volume.** Pacing does not avoid it, and
+a handful of page loads is enough to be flagged.
+
+The app detects the challenge, names it, and stops. It does **not** answer it,
+and it deliberately contains no fingerprint spoofing or other evasion — that is
+the thing the check exists to prevent. If you see the challenge, complete it
+yourself in your normal browser; the flag is per-connection and usually clears.
+
+**Scheduled checks ship disabled** for this reason. Turn them on only after a
+manual check has actually read your docket.
+
+### What still works regardless
+
+Everything that doesn't touch the portal, which is most of the value on a large
+case file: **Adopt files** you downloaded yourself, catalog naming, the
+occurrence-counted repair of a legacy folder, per-entry notes, OCR, Claude
+analysis, and RAG export. Fetch the documents by hand, point a case at the
+folder, and the app takes it from there.
 
 Use **"Why did my check find nothing?"** on the Dashboard to see which state
-you're in.
+you're in: bot challenge, not signed in, or a portal markup change.
 
 ## Being a good citizen of the portal
 

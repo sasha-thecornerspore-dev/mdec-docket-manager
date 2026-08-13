@@ -183,6 +183,10 @@
         <div class="fields">
           <label class="check"><input type="checkbox" name="schedule.enabled">
             Check on a schedule (every case marked "monitored" above)</label>
+          <p class="hint">Off by default, and worth leaving off until a manual
+            check actually reads your docket. The portal challenges automated
+            browsers; unattended checks against a portal that is blocking you
+            get the connection flagged without fetching anything.</p>
           <label>Check times (24h, comma separated)
             <input class="input" name="schedule.times" placeholder="08:00, 17:00">
             <span class="hint">Twice a day is deliberate. The portal throttles

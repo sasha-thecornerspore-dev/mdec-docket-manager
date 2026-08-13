@@ -33,7 +33,11 @@ DEFAULTS: dict = {
         "downloads_root": "",
     },
     "schedule": {
-        "enabled": True,
+        # Off by default. The portal fingerprints automated browsers and serves
+        # a bot-detection challenge, so unattended checking is likely to get the
+        # connection flagged rather than to fetch anything. Turn it on only once
+        # you've confirmed a manual check actually reads your docket.
+        "enabled": False,
         "times": ["08:00", "17:00"],   # deliberately polite: 2x/day
     },
     "login": {

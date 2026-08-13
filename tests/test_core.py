@@ -269,6 +269,24 @@ def test_saving_settings_never_writes_a_secret_to_disk(monkeypatch):
         assert "sk-ant-oops" not in written
 
 
+def test_scheduled_checks_are_off_by_default(monkeypatch):
+    """The portal fingerprints automated browsers, so a fresh install must not
+    start hitting it on a timer."""
+    with tempfile.TemporaryDirectory() as d:
+        monkeypatch.setattr(config, "app_dir", lambda: Path(d))
+        assert config.load_config()["schedule"]["enabled"] is False
+
+
+def test_enabling_the_schedule_still_persists(monkeypatch):
+    """Off by default, but a deliberate opt-in must survive a reload."""
+    with tempfile.TemporaryDirectory() as d:
+        monkeypatch.setattr(config, "app_dir", lambda: Path(d))
+        cfg = config.load_config()
+        cfg["schedule"]["enabled"] = True
+        config.save_config(cfg)
+        assert config.load_config()["schedule"]["enabled"] is True
+
+
 def test_unknown_secret_slots_are_rejected():
     with pytest.raises(ValueError):
         config.set_secret("not_a_real_slot", "x")
