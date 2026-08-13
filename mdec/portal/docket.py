@@ -96,6 +96,72 @@ PARSE_JS = r"""
 """
 
 
+# Structure-only report for when parsing finds nothing. Deliberately returns
+# shapes and counts, plus short samples, so it can be shared to diagnose a
+# portal change without handing over the contents of someone's case.
+DIAGNOSE_JS = r"""
+() => {
+  const out = {};
+  const text = document.body.innerText || '';
+  out.url = location.href;
+  out.title = document.title;
+  out.chars = text.length;
+
+  const btns = [...document.querySelectorAll('button')];
+  out.buttonCount = btns.length;
+  const tally = {};
+  btns.forEach(b => {
+    const t = (b.textContent || '').trim().slice(0, 30) || '(no text)';
+    tally[t] = (tally[t] || 0) + 1;
+  });
+  out.buttonTexts = Object.entries(tally).sort((a, b) => b[1] - a[1]).slice(0, 20);
+
+  out.containers = {
+    article: document.querySelectorAll('article').length,
+    tr: document.querySelectorAll('tr').length,
+    table: document.querySelectorAll('table').length,
+    roleRow: document.querySelectorAll('[role="row"]').length,
+    roleGrid: document.querySelectorAll('[role="grid"], [role="treegrid"]').length,
+    li: document.querySelectorAll('li').length,
+    iframe: document.querySelectorAll('iframe').length,
+  };
+  out.ariaDownload = document.querySelectorAll('[aria-label*="ownload"]').length;
+  out.headings = [...document.querySelectorAll('h1,h2,h3,h4')]
+    .map(h => (h.textContent || '').trim()).filter(Boolean).slice(0, 20);
+
+  // What the parser would find, so a mismatch is obvious.
+  out.parserWouldFind = btns.filter(b => {
+    const t = (b.textContent || '').trim();
+    return t === 'Document' || t === 'Documents';
+  }).length;
+
+  const dateRe = /\b\d{1,2}\/\d{1,2}\/\d{4}\b/;
+  const rows = [...document.querySelectorAll('article, tr, [role="row"]')];
+  out.rowsWithDates = rows.filter(r => dateRe.test(r.innerText || '')).length;
+  out.sampleRows = rows.filter(r => dateRe.test(r.innerText || ''))
+    .slice(0, 3).map(r => (r.innerText || '').replace(/\s+/g, ' ').trim().slice(0, 220));
+  return out;
+}
+"""
+
+
+async def diagnose(page) -> dict:
+    """Diagnose the frame that holds the docket, and note the others."""
+    frame = await content_frame(page)
+    report = await frame.evaluate(DIAGNOSE_JS)
+    report["frameCount"] = len(page.frames)
+    report["usedMainFrame"] = frame is page.main_frame
+    frames = []
+    for f in page.frames:
+        try:
+            frames.append({"url": (f.url or "")[:120],
+                           "score": await f.evaluate(SCORE_JS)})
+        except Exception:
+            frames.append({"url": (f.url or "")[:120], "score": None})
+    report["frames"] = frames
+    return report
+
+
 def fingerprint(entries: list[dict]) -> list[dict]:
     """Return copies of `entries` in page order, each with a `fingerprint`.
 
@@ -130,7 +196,42 @@ def diff_new(entries: list[dict], known: set[str]) -> list[dict]:
     return [e for e in entries if e["fingerprint"] not in known]
 
 
+# How much docket content a frame holds. The portal renders parts of the page in
+# iframes, and a parser that only reads the top-level document finds nothing even
+# when the docket is right there on screen.
+SCORE_JS = r"""
+() => {
+  const btns = [...document.querySelectorAll('button')].filter(b => {
+    const t = (b.textContent || '').trim();
+    return t === 'Document' || t === 'Documents';
+  }).length;
+  const dateRe = /\b\d{1,2}\/\d{1,2}\/\d{4}\b/;
+  const rows = [...document.querySelectorAll('article, tr, [role="row"]')]
+    .filter(r => dateRe.test(r.innerText || '')).length;
+  return btns * 10 + rows;
+}
+"""
+
+
+async def content_frame(page):
+    """The frame holding the docket — usually the main one, sometimes an iframe.
+
+    Returns something with the same query_selector/evaluate surface as a page,
+    so callers can treat it uniformly.
+    """
+    best, best_score = page.main_frame, -1
+    for frame in page.frames:
+        try:
+            score = await frame.evaluate(SCORE_JS)
+        except Exception:
+            continue          # cross-origin or torn down mid-navigation
+        if score > best_score:
+            best, best_score = frame, score
+    return best
+
+
 async def parse_page(page) -> list[dict]:
     """Run the in-page parser and fingerprint the result (page order preserved)."""
-    entries = await page.evaluate(PARSE_JS)
+    frame = await content_frame(page)
+    entries = await frame.evaluate(PARSE_JS)
     return fingerprint(entries)

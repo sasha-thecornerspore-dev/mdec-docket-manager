@@ -468,6 +468,245 @@ def test_case_folder_defaults_to_a_subfolder_per_case(monkeypatch):
         assert folder == str(Path(r"D:\Cases") / "C01cv24001234")
 
 
+# --- portal page state ----------------------------------------------------
+#
+# The signed-out case page is the failure that made the app look functional
+# while doing nothing: it shows a "Sign In / Register" link, no password field,
+# and sits on the "Please wait…" spinner. A check that treats that as signed-in
+# parses an empty page and reports success.
+
+class _FakePage:
+    """Stands in for a Playwright page: `url` plus a scripted evaluate()."""
+
+    def __init__(self, url, signals):
+        self.url = url
+        self._signals = signals
+
+    async def evaluate(self, _js):
+        return self._signals
+
+    async def wait_for_timeout(self, _ms):
+        return None
+
+
+def _signals(**over):
+    base = {"docButtons": 0, "rows": 0, "chars": 0, "spinner": False,
+            "signInText": False, "signInLink": False, "hasDocketWord": False,
+            "sample": ""}
+    base.update(over)
+    return base
+
+
+def _state(page):
+    import asyncio
+    from mdec.portal import browser as br
+    return asyncio.run(br.page_state(page))[0]
+
+
+def test_signed_out_case_page_is_not_mistaken_for_signed_in():
+    """The real regression, with the exact signals the live page produced:
+    'Sign In / Register' text, the spinner, 459 characters, no rows."""
+    from mdec.portal import browser as br
+    page = _FakePage("https://casesearch.courts.state.md.us/casesearch/"
+                     "case-detail-page?caseId=C01cv24001234",
+                     _signals(signInText=True, signInLink=True, spinner=True,
+                              chars=459))
+    assert _state(page) == br.SIGNED_OUT
+
+
+def test_a_login_link_alone_does_not_override_a_loading_page():
+    """Header login links exist on healthy pages — only the explicit
+    'Sign In / Register' offer is decisive while the page is still loading."""
+    from mdec.portal import browser as br
+    page = _FakePage("https://casesearch.courts.state.md.us/x",
+                     _signals(spinner=True, signInLink=True))
+    assert _state(page) == br.LOADING
+
+
+def test_docket_content_means_ready():
+    from mdec.portal import browser as br
+    page = _FakePage("https://casesearch.courts.state.md.us/x",
+                     _signals(docButtons=950, rows=2885, hasDocketWord=True))
+    assert _state(page) == br.READY
+
+
+def test_docket_rows_without_buttons_still_count_as_ready():
+    """A case with no downloadable documents is still a loaded docket."""
+    from mdec.portal import browser as br
+    page = _FakePage("https://casesearch.courts.state.md.us/x",
+                     _signals(rows=40, hasDocketWord=True))
+    assert _state(page) == br.READY
+
+
+def test_spinner_alone_is_loading_not_signed_out():
+    from mdec.portal import browser as br
+    page = _FakePage("https://casesearch.courts.state.md.us/x",
+                     _signals(spinner=True))
+    assert _state(page) == br.LOADING
+
+
+def test_sign_in_url_is_signed_out_without_reading_the_body():
+    from mdec.portal import browser as br
+    page = _FakePage("https://mdecportal.courts.state.md.us/MDEC/login.htm",
+                     _signals(docButtons=99))
+    assert _state(page) == br.SIGNED_OUT
+
+
+def test_settled_page_with_nothing_recognizable_is_empty():
+    from mdec.portal import browser as br
+    page = _FakePage("https://casesearch.courts.state.md.us/x",
+                     _signals(chars=800))
+    assert _state(page) == br.EMPTY
+
+
+def test_stuck_spinner_resolves_to_signed_out():
+    """A signed-in page resolves in seconds; an endless spinner means no session."""
+    import asyncio
+    from mdec.portal import browser as br
+    page = _FakePage("https://casesearch.courts.state.md.us/x",
+                     _signals(spinner=True))
+    state, signals = asyncio.run(br.wait_for_case_page(page, timeout_ms=50))
+    assert state == br.SIGNED_OUT
+    assert "spinner" in signals.get("reason", "")
+
+
+class _FakeFrame:
+    def __init__(self, url, score, state=None):
+        self.url = url
+        self._score = score
+        self._state = state
+
+    async def evaluate(self, js):
+        # The two scripts are told apart by what they return.
+        if "btns * 10" in js:
+            return self._score
+        return self._state if self._state is not None else _signals()
+
+
+def test_content_frame_picks_the_frame_holding_the_docket():
+    """The portal renders in iframes; parsing only the top document finds
+    nothing even when the docket is on screen."""
+    import asyncio
+    from mdec.portal import docket
+
+    main = _FakeFrame("https://portal/case", 0)
+    chrome = _FakeFrame("https://portal/nav", 2)
+    content = _FakeFrame("https://portal/docket-grid", 9500)
+
+    class P:
+        main_frame = main
+        frames = [main, chrome, content]
+
+    assert asyncio.run(docket.content_frame(P())) is content
+
+
+def test_content_frame_falls_back_to_the_main_frame():
+    import asyncio
+    from mdec.portal import docket
+
+    main = _FakeFrame("https://portal/case", 120)
+
+    class P:
+        main_frame = main
+        frames = [main]
+
+    assert asyncio.run(docket.content_frame(P())) is main
+
+
+def test_content_frame_survives_a_cross_origin_frame():
+    import asyncio
+    from mdec.portal import docket
+
+    class Hostile(_FakeFrame):
+        async def evaluate(self, js):
+            raise RuntimeError("cross-origin frame access denied")
+
+    main = _FakeFrame("https://portal/case", 5)
+    bad = Hostile("https://ads.example/x", 0)
+
+    class P:
+        main_frame = main
+        frames = [main, bad]
+
+    assert asyncio.run(docket.content_frame(P())) is main
+
+
+def test_docket_inside_an_iframe_is_seen_as_ready():
+    """Regression guard: content in a child frame must not read as empty."""
+    import asyncio
+    from mdec.portal import browser as br
+
+    main = _FakeFrame("https://portal/case", 0, _signals(chars=400))
+    inner = _FakeFrame("https://portal/grid", 9000,
+                       _signals(docButtons=900, rows=2800, hasDocketWord=True))
+
+    class P:
+        url = "https://casesearch.courts.state.md.us/casesearch/case-detail-page"
+        main_frame = main
+        frames = [main, inner]
+
+        async def evaluate(self, js):
+            return await main.evaluate(js)
+
+    state, _ = asyncio.run(br.page_state(P()))
+    assert state == br.READY
+
+
+def test_bot_challenge_frame_is_reported_as_captcha():
+    """The portal serves a DataDome challenge to the automated browser. The app
+    must name that state, not mislabel it as 'empty' or try to get past it."""
+    import asyncio
+    from mdec.portal import browser as br
+
+    main = _FakeFrame("https://casesearch.courts.state.md.us/x", 0,
+                      _signals(chars=239))
+    challenge = _FakeFrame(
+        "https://geo.captcha-delivery.com/captcha/?initialCid=AHrlqAA", 0,
+        _signals())
+
+    class P:
+        url = "https://casesearch.courts.state.md.us/casesearch/case-detail-page"
+        main_frame = main
+        frames = [main, challenge]
+
+        async def evaluate(self, js):
+            return await main.evaluate(js)
+
+    state, signals = asyncio.run(br.page_state(P()))
+    assert state == br.CAPTCHA
+    assert "captcha-delivery.com" in signals["captchaUrl"]
+
+
+def test_a_challenge_frame_does_not_block_an_already_loaded_docket():
+    """If the docket rendered, a leftover challenge frame must not stop a run."""
+    import asyncio
+    from mdec.portal import browser as br
+
+    main = _FakeFrame("https://casesearch.courts.state.md.us/x", 0,
+                      _signals(docButtons=900, rows=2800, hasDocketWord=True))
+    challenge = _FakeFrame("https://geo.captcha-delivery.com/captcha/", 0,
+                           _signals())
+
+    class P:
+        url = "https://casesearch.courts.state.md.us/casesearch/case-detail-page"
+        main_frame = main
+        frames = [main, challenge]
+
+        async def evaluate(self, js):
+            return await main.evaluate(js)
+
+    assert asyncio.run(br.page_state(P()))[0] == br.READY
+
+
+def test_profile_lock_errors_are_recognized():
+    from mdec.portal import browser as br
+    assert br._is_profile_locked(
+        Exception("Opening in existing browser session.")) is True
+    assert br._is_profile_locked(
+        Exception("profile is already in use by another instance")) is True
+    assert br._is_profile_locked(Exception("net::ERR_CONNECTION_REFUSED")) is False
+
+
 def test_desktop_picks_the_configured_port_when_free():
     from mdec import desktop
     import socket

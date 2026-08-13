@@ -130,6 +130,23 @@ Set **Settings → Claude analysis → Backend**:
   Windows Credential Manager.
 - **Auto** (default) — uses the API key if one is stored, otherwise the CLI.
 
+## Before you rely on it: the portal may refuse automation
+
+As of August 2026 the Maryland portal ("Case Portal 1.1") sits behind **DataDome
+bot detection**, and serves a CAPTCHA to the automated browser instead of the
+case page. The app detects this and says so plainly — it does **not** attempt to
+answer or evade the challenge.
+
+If the challenge appears once, complete it yourself in the portal window and
+carry on. If it returns on every check, the portal is refusing automated
+browsing from your connection, and no amount of configuration will change that.
+The archive features still work: download through the portal by hand into the
+case folder, and use **Adopt files** to bring everything into the app with
+correct names, notes, OCR, and analysis.
+
+Use **"Why did my check find nothing?"** on the Dashboard to see which state
+you're in.
+
 ## Being a good citizen of the portal
 
 The Maryland portal throttles aggressive automation. This app is deliberately

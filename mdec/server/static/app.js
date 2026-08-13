@@ -185,8 +185,18 @@ function renderChecklist() {
       '"Download browser" below (~130 MB, once).'],
   );
   rows.push(
-    [s.browser_running, 'Portal browser open',
-      'Click "Open portal window" and sign in.'],
+    [s.portal_state === 'ready',
+      'Signed in — docket visible',
+      s.portal_state === 'captcha'
+        ? 'The portal is showing a bot-detection challenge. Open the portal ' +
+          'window and complete it yourself — the app will not answer it for you.'
+        : s.portal_state === 'signed_out'
+        ? 'Not signed in. Click "Open portal window", sign in, and confirm you ' +
+          'can see your case — checks find nothing until then.'
+        : s.portal_state === 'empty'
+        ? 'Signed in, but that case number shows no docket. Check it matches ' +
+          'the docket exactly.'
+        : 'Click "Open portal window" to sign in and confirm the docket loads.'],
     [s.schedule.enabled, `Scheduled checks at ${s.schedule.times.join(', ')}`,
       'Scheduled checks are off.'],
   );
@@ -706,6 +716,34 @@ $('#btnInstallBrowser').addEventListener('click', async () => {
     await loadFeatures();
   } catch (e) { toast(e.message, true); }
   finally { b.disabled = false; b.textContent = 'Download browser (~130 MB)'; }
+});
+
+$('#btnDiagnose').addEventListener('click', async () => {
+  const b = $('#btnDiagnose');
+  b.disabled = true; b.textContent = 'Looking at the page…';
+  try {
+    const r = await api('/actions/diagnose', { method: 'POST' });
+    toast(r.message, !r.ok);
+    const rep = r.report;
+    $('#adoptOut').innerHTML = !rep ? '' : `
+      <p class="hint"><strong>${esc(rep.verdict)}</strong></p>
+      <div class="r-row"><span>state</span><span>${esc(rep.state)}</span>
+        <span>${rep.chars} chars on page</span></div>
+      <div class="r-row"><span>doc buttons</span>
+        <span>parser finds ${rep.parserWouldFind}</span>
+        <span>${rep.buttonCount} buttons total</span></div>
+      <div class="r-row"><span>rows</span>
+        <span>${rep.rowsWithDates} with dates</span>
+        <span>${esc(JSON.stringify(rep.containers))}</span></div>
+      ${rep.buttonTexts?.length ? `<p class="hint">Button labels on the page:</p>` +
+        rep.buttonTexts.map(([t, n]) =>
+          `<div class="r-row"><span>${n}&times;</span><span>${esc(t)}</span>
+           <span></span></div>`).join('') : ''}
+      ${rep.headings?.length ? `<p class="hint">Sections: ${
+        esc(rep.headings.join(' · '))}</p>` : ''}`;
+    await refreshAll();
+  } catch (e) { toast(e.message, true); }
+  finally { b.disabled = false; b.textContent = 'Why did my check find nothing?'; }
 });
 
 $('#btnAdopt').addEventListener('click', async () => {

@@ -26,23 +26,52 @@ class LoginFailed(Exception):
     pass
 
 
+SIGNED_OUT_HELP = (
+    "You are not signed in to the Maryland Judiciary portal, so the case page "
+    "has no docket on it.\n\n"
+    "Click \"Open portal window\", sign in there (the app never handles your "
+    "password in attach mode), wait until you can see the case, then run the "
+    "check again. The session is remembered afterwards."
+)
+
+
+CAPTCHA_HELP = (
+    "The portal is showing a security check (bot detection) instead of your "
+    "case, so there is no docket to read.\n\n"
+    "This app will not answer that challenge for you — it is the site asking a "
+    "human to confirm they are one. Click \"Open portal window\" and complete "
+    "it yourself, then run the check again.\n\n"
+    "If the challenge comes back every time, the portal is refusing automated "
+    "browsing for your connection, and checks cannot run until that changes."
+)
+
+
 async def ensure_logged_in(cfg: dict, case_number: str, log=print) -> None:
     """Make sure the persistent session can see the case page. Raises otherwise."""
     page = await br.browser.page()
-    ok = await br.goto_case(page, case_number)
-    if ok:
+    state, signals = await br.goto_case(page, case_number)
+    if state == br.READY:
         return
-    if cfg["login"]["mode"] != "managed":
+    if state == br.CAPTCHA:
+        raise br.NotLoggedIn(CAPTCHA_HELP)
+    if state == br.EMPTY:
         raise br.NotLoggedIn(
-            "Portal session expired. Click \"Open portal window\" and sign in "
-            "(attach mode), or switch to managed login in Settings."
-        )
-    log("Session expired — attempting managed login")
+            "The case page loaded but contains no docket entries.\n\n"
+            "Check the case number in Settings → Cases is exactly as printed on "
+            "the docket. If it is right, you may not be signed in — click "
+            "\"Open portal window\" and confirm you can see the case there.")
+    if cfg["login"]["mode"] != "managed":
+        raise br.NotLoggedIn(SIGNED_OUT_HELP)
+
+    log("Not signed in — attempting managed login")
     await _managed_login(page, cfg, log)
-    ok = await br.goto_case(page, case_number)
-    if not ok:
-        raise LoginFailed("Managed login completed but the case page still "
-                          "looks signed out. Check the selectors in Settings.")
+    state, _ = await br.goto_case(page, case_number)
+    if state != br.READY:
+        raise LoginFailed(
+            "Managed login ran but the case page still shows no docket. "
+            "Either the credentials were rejected or the sign-in selectors in "
+            "Settings no longer match the portal. Watch the browser window "
+            "during a check to see where it stops.")
 
 
 async def _managed_login(page, cfg: dict, log=print) -> None:

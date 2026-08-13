@@ -110,6 +110,7 @@ async def api_status():
         "schedule": cfg["schedule"],
         "login_mode": cfg["login"]["mode"],
         "browser_running": br.browser.running,
+        "portal_state": monitor.last_portal_state,
         "runs": db.list_runs(5),
     }
 
@@ -384,6 +385,12 @@ async def api_install_browser():
     finally:
         monitor.status["message"] = "idle"
     return {"ok": ok, "message": msg}
+
+
+@app.post("/api/actions/diagnose")
+async def api_diagnose(case_id: int | None = None):
+    """Structure-only report on the case page, for when a check finds nothing."""
+    return await monitor.diagnose_page(case_id)
 
 
 @app.post("/api/actions/adopt")

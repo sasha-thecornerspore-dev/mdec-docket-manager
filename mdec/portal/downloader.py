@@ -40,24 +40,24 @@ class EntryDownload:
     error: str = ""
 
 
-async def _dialog(page):
-    return await page.query_selector('[role="dialog"]')
+async def _dialog(frame):
+    return await frame.query_selector('[role="dialog"]')
 
 
-async def _close_any_dialog(page) -> None:
+async def _close_any_dialog(frame) -> None:
     for _ in range(15):
-        dlg = await _dialog(page)
+        dlg = await _dialog(frame)
         if not dlg:
             return
         btn = await dlg.query_selector("button:has-text('Close')")
         if btn:
             await btn.click()
-        await page.wait_for_timeout(200)
+        await frame.wait_for_timeout(200)
 
 
-async def _check_throttle(page) -> None:
+async def _check_throttle(frame) -> None:
     try:
-        body = (await page.inner_text("body", timeout=3000)).lower()
+        body = (await frame.inner_text("body", timeout=3000)).lower()
     except Exception:
         return
     if "please wait" in body and "refresh" in body:
@@ -65,37 +65,43 @@ async def _check_throttle(page) -> None:
 
 
 async def download_entry(page, button_index: int, dest_dir: Path,
-                         breathing_ms: int = 300) -> EntryDownload:
-    """Open one entry's modal, download every file in it, close, pace."""
+                         breathing_ms: int = 300, frame=None) -> EntryDownload:
+    """Open one entry's modal, download every file in it, close, pace.
+
+    `frame` is where the elements live (the docket can be inside an iframe);
+    `page` stays the download source, because downloads are a page-level event
+    no matter which frame triggered them.
+    """
+    frame = frame or page
     result = EntryDownload(button_index=button_index)
     dest_dir.mkdir(parents=True, exist_ok=True)
-    await _close_any_dialog(page)
+    await _close_any_dialog(frame)
 
-    btn = await page.query_selector(f'button[data-mdec-idx="{button_index}"]')
+    btn = await frame.query_selector(f'button[data-mdec-idx="{button_index}"]')
     if not btn:
-        await _check_throttle(page)
+        await _check_throttle(frame)
         result.status, result.error = "error", "button not found (page re-rendered?)"
         return result
 
     await btn.scroll_into_view_if_needed()
-    await page.wait_for_timeout(100)
+    await frame.wait_for_timeout(100)
     await btn.click()
 
     modal = None
     for _ in range(30):
-        dlg = await _dialog(page)
+        dlg = await _dialog(frame)
         if dlg and await dlg.query_selector('[aria-label*="Download document"]'):
             modal = dlg
             break
-        await page.wait_for_timeout(100)
+        await frame.wait_for_timeout(100)
 
     if not modal:
-        stray = await _dialog(page)
+        stray = await _dialog(frame)
         if stray:
             result.status = "view_only"
-            await _close_any_dialog(page)
+            await _close_any_dialog(frame)
         else:
-            await _check_throttle(page)
+            await _check_throttle(frame)
             result.status = "no_modal"
         return result
 
@@ -124,32 +130,35 @@ async def download_entry(page, button_index: int, dest_dir: Path,
         except Exception as exc:  # keep going; caller sees partial + error
             result.status = "error"
             result.error = f"{title}: {exc}"
-        await page.wait_for_timeout(100)
+        await frame.wait_for_timeout(100)
 
-    await _close_any_dialog(page)
+    await _close_any_dialog(frame)
     for _ in range(25):
-        if not await _dialog(page):
+        if not await _dialog(frame):
             break
-        await page.wait_for_timeout(100)
-    await page.wait_for_timeout(breathing_ms)  # DO NOT REMOVE — throttle protection
+        await frame.wait_for_timeout(100)
+    await frame.wait_for_timeout(breathing_ms)  # DO NOT REMOVE — throttle protection
     return result
 
 
 async def download_many(page, button_indices: list[int], dest_dir: Path,
                         breathing_ms: int = 300, batch_size: int = 10,
                         batch_pause_s: float = 3.0, on_progress=None,
-                        reparse=None) -> list[EntryDownload]:
+                        reparse=None, frame=None) -> list[EntryDownload]:
     """Download a list of entries with batch pacing and throttle recovery.
 
     `reparse` is an async callable that re-parses the page (re-tagging buttons)
-    after a session-refresh spinner; without it a throttle aborts the run.
+    after a session-refresh spinner; without it a throttle aborts the run. It
+    returns the frame to keep using, since a re-render can replace it.
     """
+    frame = frame or page
     results: list[EntryDownload] = []
     for pos, idx in enumerate(button_indices):
         attempts = 0
         while True:
             try:
-                res = await download_entry(page, idx, dest_dir, breathing_ms)
+                res = await download_entry(page, idx, dest_dir, breathing_ms,
+                                           frame=frame)
                 break
             except SessionRefresh:
                 attempts += 1
@@ -158,10 +167,13 @@ async def download_many(page, button_indices: list[int], dest_dir: Path,
                                         error="session-refresh throttle, gave up")
                     break
                 await asyncio.sleep(20)   # let the portal settle — field-tested ~15s
-                await reparse()
+                refreshed = await reparse()
+                if refreshed is not None:
+                    frame = refreshed
         if res.status == "error" and attempts == 0:
             # one retry for transient failures (dropped download etc.)
-            retry = await download_entry(page, idx, dest_dir, breathing_ms)
+            retry = await download_entry(page, idx, dest_dir, breathing_ms,
+                                         frame=frame)
             if retry.status == "ok" and retry.files:
                 res = retry
         results.append(res)

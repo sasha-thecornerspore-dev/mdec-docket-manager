@@ -70,6 +70,45 @@ The server hadn't finished starting. Reload. If it persists, run
 
 ---
 
+## A check finds nothing
+
+Click **"Why did my check find nothing?"** on the Dashboard. It loads the case
+page and reports what's actually there — which distinguishes the three causes
+below, since from the outside they look identical.
+
+### "The portal is showing a bot-detection challenge"
+The portal (Case Portal 1.1) sits behind DataDome bot detection, and serves a
+CAPTCHA to the automated browser instead of your case.
+
+**The app will not answer that challenge**, by design — it's the site asking a
+human to confirm they're one. Open the portal window and complete it yourself,
+then run the check.
+
+If the challenge returns on every check, the portal is refusing automated
+browsing from your connection and this app cannot read the docket. That's the
+portal's decision, not a bug to work around. Download what you need through the
+portal by hand and use **Adopt files** to bring it into the app.
+
+### "Not signed in"
+The case page shows "Sign In / Register" and no docket. Click **Open portal
+window**, sign in, confirm you can see the case, then check again. The session is
+remembered afterwards.
+
+The Dashboard's **Signed in — docket visible** row tracks this, so you can see
+the state before spending a check on it.
+
+### "Signed in and the docket is on screen, but none of the buttons are labelled Document"
+The portal's markup changed. The diagnostic lists the button labels it *did*
+find — that's what's needed to fix the parser. Open an issue with that list
+(labels and counts only; no case content).
+
+### The check reports success but found 0 entries
+It no longer does — that's recorded as a **warning** now, because a real docket
+always has entries and reporting it as "ok" hid a broken check. Older runs in
+your Activity log may still show `ok` with 0 entries; those were this failure.
+
+---
+
 ## Login and session
 
 ### "Portal session expired" on every check
@@ -100,6 +139,14 @@ Work down this list:
 ### Managed login asks for a code every single time
 Normal if the profile keeps getting cleared. Don't delete `.pw-profile`, and let
 the app manage the browser rather than closing it forcibly.
+
+### "The portal browser profile is in use by a window this app didn't start"
+A portal window outlived the app — usually the app was killed while a browser was
+open. Chromium then refuses the profile and every check fails.
+
+The app now closes those orphans itself (matching only its own profile path, so
+your normal Chrome is never touched) and retries once. If you still see this,
+close any leftover portal windows by hand.
 
 ---
 

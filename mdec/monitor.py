@@ -37,6 +37,7 @@ class Monitor:
         self._sched_task: asyncio.Task | None = None
         self._fired: set[str] = set()          # "YYYY-MM-DD HH:MM" already run
         self.status: dict = {"busy": False, "message": "idle", "last_check": None}
+        self.last_portal_state: str | None = None
 
     # --- scheduling --------------------------------------------------------
 
@@ -126,6 +127,20 @@ class Monitor:
             log("Parsing docket")
             entries = await docket.parse_page(page)
             log(f"Parsed {len(entries)} entries")
+
+            if not entries:
+                # A real docket always has entries. Reporting this as a clean
+                # run is how a broken check masquerades as "nothing new".
+                msg = ("Parsed the case page but found no docket entries at "
+                       "all. That normally means the session isn't signed in, "
+                       "or the case number doesn't match a case you can see. "
+                       "Click \"Open portal window\" and check you can see the "
+                       "docket there.")
+                db.finish_run(run_id, "warning", log=msg)
+                self.status["message"] = "no docket entries found"
+                return {"ok": False, "message": msg, "new_entries": 0,
+                        "new_documents": 0}
+
             known = db.known_fingerprints(case["id"])
             new = docket.diff_new(entries, known)
 
@@ -174,8 +189,11 @@ class Monitor:
                 dl_cfg = cfg["downloader"]
 
                 async def reparse():
+                    """Re-tag data-mdec-idx and hand back the frame to use —
+                    a re-render can replace the frame the docket lives in."""
                     log("Session refresh hit — re-parsing page")
-                    await docket.parse_page(page)   # re-tags data-mdec-idx
+                    await docket.parse_page(page)
+                    return await docket.content_frame(page)
 
                 async def progress(done, total, res):
                     log(f"Downloaded {done}/{total} "
@@ -187,6 +205,7 @@ class Monitor:
                     batch_size=dl_cfg["batch_size"],
                     batch_pause_s=dl_cfg["batch_pause_s"],
                     on_progress=progress, reparse=reparse,
+                    frame=await docket.content_frame(page),
                 )
                 for entry, res in zip(fresh, results):
                     if res.status in ("view_only", "no_modal"):
@@ -229,7 +248,8 @@ class Monitor:
             return {"ok": True, "new_entries": len(new), "new_documents": new_docs,
                     "adopted": adopted["adopted"], "warnings": warnings}
 
-        except (br.NotLoggedIn, br.BrowserMissing, login.LoginFailed) as exc:
+        except (br.NotLoggedIn, br.BrowserMissing, br.BrowserBusy,
+                login.LoginFailed) as exc:
             db.finish_run(run_id, "warning", log=str(exc))
             self.status["message"] = str(exc)
             return {"ok": False, "message": str(exc)}
@@ -297,13 +317,69 @@ class Monitor:
         cfg = config.load_config()
         case = self._resolve_case(case_id)
         page = await br.browser.page()
-        if case:
-            ok = await br.goto_case(page, case["case_number"])
-            return ("Portal window open — you appear to be signed in."
-                    if ok else "Portal window open — please sign in. The session "
-                               "will be remembered.")
+        if not case:
+            await page.goto(cfg["login"]["login_url"])
+            return "Portal window open at the sign-in page."
+
+        state, _ = await br.goto_case(page, case["case_number"])
+        self.last_portal_state = state
+        if state == br.READY:
+            return ("Portal window open and the docket is visible — you are "
+                    "signed in. Run a check whenever you like.")
+        if state == br.EMPTY:
+            return ("Portal window open, but the page has no docket on it. "
+                    "Check the case number matches a case your account can see.")
+        # Signed out: land them on the sign-in page rather than a dead case page.
         await page.goto(cfg["login"]["login_url"])
-        return "Portal window open at the sign-in page."
+        return ("Portal window open at the sign-in page — you are not signed in "
+                "yet. Sign in there, navigate to your case to confirm you can "
+                "see the docket, then come back and click \"Check now\".")
+
+    async def diagnose_page(self, case_id: int | None = None) -> dict:
+        """Report what the case page actually contains.
+
+        For when a check finds nothing: it distinguishes "not signed in" from
+        "signed in but the portal's markup changed", which otherwise look
+        identical from the outside.
+        """
+        case = self._resolve_case(case_id)
+        if not case:
+            return {"ok": False, "message": "No case selected."}
+        try:
+            page = await br.browser.page()
+            state, signals = await br.goto_case(page, case["case_number"])
+            self.last_portal_state = state
+            report = await docket.diagnose(page)
+        except (br.BrowserMissing, br.BrowserBusy) as exc:
+            return {"ok": False, "message": str(exc)}
+        except Exception as exc:
+            return {"ok": False, "message": f"{type(exc).__name__}: {exc}"}
+
+        report["state"] = state
+        if state == br.CAPTCHA:
+            verdict = ("The portal is showing a bot-detection challenge instead "
+                       "of your case. Open the portal window and complete it "
+                       "yourself — the app will not answer it for you. If it "
+                       "returns every time, the portal is refusing automated "
+                       "browsing and checks cannot run.")
+        elif state == br.SIGNED_OUT:
+            verdict = ("Not signed in — that is why checks find nothing. Click "
+                       "\"Open portal window\" and sign in.")
+        elif report.get("parserWouldFind"):
+            verdict = (f"Signed in, and the page has "
+                       f"{report['parserWouldFind']} document buttons. Parsing "
+                       f"should work — run a check.")
+        elif state == br.READY:
+            verdict = ("Signed in and the docket is on screen, but none of the "
+                       "buttons are labelled \"Document\"/\"Documents\", so the "
+                       "downloader can't find them. The portal's markup has "
+                       "probably changed — the button labels below are what's "
+                       "needed to fix it.")
+        else:
+            verdict = ("The page has no docket content on it. Check the case "
+                       "number matches a case your account can open.")
+        report["verdict"] = verdict
+        return {"ok": True, "report": report, "message": verdict}
 
     async def adopt_now(self, case_id: int | None = None) -> dict:
         """Link files already in the folder to docket entries, no downloading."""
