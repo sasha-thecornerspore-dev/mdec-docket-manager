@@ -9,6 +9,10 @@ Produces, in dist/:
     MDEC-Docket-Manager-<ver>-portable.zip the same app as a folder to unzip
 
 Needs PyInstaller (pip) and Inno Setup 6 (winget install JRSoftware.InnoSetup).
+
+Build from a virtual environment, not from the interpreter on PATH — the build
+refuses to run otherwise, and prints the three commands that fix it. See
+require_clean_build_env() for why.
 """
 
 from __future__ import annotations
@@ -47,6 +51,68 @@ def find_iscc() -> str | None:
         if p.is_file():
             return str(p)
     return shutil.which("ISCC")
+
+
+# Distributions that must never be importable while we freeze, and why. These
+# are licences that cannot ship inside a redistributed binary, not packages that
+# are merely unused.
+FORBIDDEN_WHEN_FREEZING = {
+    "pymupdf": "AGPL-3.0",
+    "pymupdfb": "AGPL-3.0",
+    "fitz": "AGPL-3.0 (PyMuPDF)",
+}
+
+
+def require_clean_build_env() -> None:
+    """Refuse to freeze from a shared or contaminated interpreter.
+
+    PyInstaller bundles what it can reach. This project had no environment of
+    its own, so it froze from whatever `python` resolved to — and on the
+    author's machine that interpreter carries a hand-installed AGPL PyMuPDF in
+    user site-packages.
+
+    Nothing here imports it today. That is not a licence control: one
+    hiddenimport, or a `--collect-all` added to the spec for an unrelated
+    reason, would sweep it into a shipped binary, and no manifest in this repo
+    would show it. The same class of accident already happened once in a
+    sibling project, where an Apache-2.0 wheel quietly carried an LGPL FFmpeg
+    binary into four public releases.
+
+    A venv built from requirements.txt makes it impossible instead of unlikely.
+    """
+    problems: list[str] = []
+
+    if sys.prefix == sys.base_prefix:
+        problems.append(
+            "this is not a virtual environment, so the build would freeze from "
+            f"whatever is installed in {sys.prefix}")
+
+    from importlib import metadata
+    for dist in metadata.distributions():
+        name = ((dist.metadata["Name"] or "") if dist.metadata else "").strip().lower()
+        if name in FORBIDDEN_WHEN_FREEZING:
+            problems.append(
+                f"{name} {dist.version} is importable here and is "
+                f"{FORBIDDEN_WHEN_FREEZING[name]}, which cannot ship in a "
+                f"redistributed binary")
+
+    if not problems:
+        return
+
+    # Creating the venv with THIS interpreter is safe even when this one is the
+    # contaminated interpreter: a venv does not inherit user site-packages, so
+    # the AGPL package visible here will not be visible inside it.
+    venv_py = r".venv\Scripts\python" if os.name == "nt" else ".venv/bin/python"
+    raise SystemExit(
+        "Refusing to build.\n\n  - "
+        + "\n  - ".join(problems)
+        + "\n\nThis app ships as a frozen binary, so anything importable here "
+          "can end up\ninside it. Build from a clean environment:\n\n"
+          f"    \"{sys.executable}\" -m venv .venv\n"
+          f"    {venv_py} -m pip install -r requirements.txt\n"
+          f"    {venv_py} -m pip install pyinstaller\n"
+          f"    {venv_py} tools/build_installer.py\n"
+    )
 
 
 def build_exe() -> None:
@@ -106,6 +172,7 @@ def main() -> int:
     ver = version()
     print(f"MDEC Docket Manager {ver}\n")
     if not args.skip_exe:
+        require_clean_build_env()
         build_exe()
     elif not APP_DIR.is_dir():
         raise SystemExit("--skip-exe given but build_dist/ has no build")

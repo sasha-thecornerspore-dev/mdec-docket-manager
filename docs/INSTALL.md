@@ -119,11 +119,27 @@ and installer — no runtime data, no case data.
 
 ## Building the installer
 
+Build from a virtual environment. The build refuses to run otherwise:
+
 ```bash
-python -m pip install pyinstaller
+python -m venv .venv
+.venv\Scripts\python -m pip install -r requirements.txt
+.venv\Scripts\python -m pip install pyinstaller
 winget install JRSoftware.InnoSetup
-python tools/build_installer.py
+.venv\Scripts\python tools/build_installer.py
 ```
+
+PyInstaller bundles whatever it can import, so freezing from the interpreter on
+PATH means the binary inherits everything ever `pip install`ed on that machine.
+`require_clean_build_env()` in `tools/build_installer.py` refuses to freeze from
+a non-venv interpreter, or from any environment where an AGPL package such as
+PyMuPDF is importable — a licence that cannot ship inside a redistributed
+binary. "Nothing imports it today" is not a control: one `hiddenimport`, or a
+`--collect-all` added to the spec for an unrelated reason, would sweep it in
+and no manifest in this repo would show it.
+
+Creating the venv with the contaminated interpreter is fine — a venv does not
+inherit user site-packages, so the offending package is not visible inside it.
 
 Produces in `dist/`:
 
