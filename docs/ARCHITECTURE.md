@@ -191,6 +191,12 @@ Claude, two backends behind one interface:
 `resolve_backend()` centralizes the choice and raises `AnalyzerNotConfigured`
 with the exact fix, which the UI surfaces verbatim.
 
+On `"auto"` it **prefers the CLI**: a Claude subscription is already paid for,
+while the API bills per token, so silently reaching for a stored key first
+would be a surprising default. The key is the fallback. `"api"` and
+`"subscription"` force the choice and fail loudly rather than quietly using the
+other one.
+
 ### `monitor.py`
 The scheduler and the check. Runs are **single-flight** behind an `asyncio.Lock`
 — overlapping loops were the reference run's "multiple async loops = chaos"

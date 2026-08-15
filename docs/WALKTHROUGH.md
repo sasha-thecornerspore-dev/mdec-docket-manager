@@ -221,8 +221,10 @@ to the Notes tab with that entry preselected.
 1. Tick **Analyze new filings**.
 2. Tick **Analyze automatically as documents arrive** to have each check analyze
    what it downloaded. Leave it off to analyze by hand.
-3. Choose a **Backend** — *Auto* uses your API key if you've stored one and
-   otherwise your Claude subscription via the CLI. See
+3. Choose a **Backend** — *Auto* uses your Claude subscription through the
+   signed-in Claude Code CLI, and falls back to a stored Anthropic API key only
+   if the CLI isn't available. Your subscription is already paid for; the API
+   bills per token, so it's the option rather than the default. See
    [INSTALL.md](INSTALL.md#optional-claude-analysis) for setting either up.
 4. Save. The Dashboard checklist confirms which backend is live, e.g.
    `Claude analysis (cli)`.

@@ -72,8 +72,11 @@ DEFAULTS: dict = {
     },
     "analysis": {
         "enabled": False,
-        # "auto": use the stored API key if present, else the logged-in Claude
-        # Code CLI (Claude subscription). Or force "api" / "subscription".
+        # "auto": use your Claude subscription via the logged-in Claude Code
+        # CLI, falling back to a stored Anthropic API key only if the CLI is
+        # not available. The subscription is already paid for; the API bills
+        # per token, so it is the option, not the default. Force either with
+        # "api" / "subscription".
         "backend": "auto",
         "model": "claude-opus-5",
         "auto_analyze_new": True,

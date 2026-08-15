@@ -7,8 +7,13 @@
   (`claude -p --output-format json`). No API key needed — just `claude` on
   PATH and signed in.
 
-`analysis.backend` in Settings picks: "auto" (API key if stored, else the CLI),
-"api", or "subscription".
+`analysis.backend` in Settings picks: "auto", "api", or "subscription".
+
+**"auto" prefers the subscription.** If the Claude Code CLI is on PATH and
+signed in, it is used even when an API key happens to be stored — the
+subscription is already paid for, while the API bills per token. The stored
+key is the fallback, not the first choice. Force either with "api" /
+"subscription" if you want the other one.
 
 Everything produced here is INFORMATIONAL, NOT LEGAL ADVICE, and the prompt +
 UI + docs all say so.
@@ -92,15 +97,18 @@ def resolve_backend(cfg: dict) -> tuple[str, str]:
             "Backend is set to 'subscription' but the Claude Code CLI ('claude') "
             "was not found on PATH. Install Claude Code and sign in with your "
             "Claude subscription (run: claude), or switch the backend to 'api'.")
-    # auto: prefer the API key, fall back to the subscription CLI
-    if api_key:
-        return "api", api_key
+    # auto: prefer the subscription the user already pays for, and fall back to
+    # the metered API key only when the CLI is unavailable. Choosing the key
+    # first would silently bill per token for work a Pro/Max plan already
+    # covers, which is a surprising default for a desktop app.
     if cli:
         return "cli", cli
+    if api_key:
+        return "api", api_key
     raise AnalyzerNotConfigured(
-        "No Claude backend available. Either store an Anthropic API key in "
-        "Settings, or install the Claude Code CLI and sign in with your Claude "
-        "subscription.")
+        "No Claude backend available. Install the Claude Code CLI and sign in "
+        "with your Claude subscription (run: claude), or store an Anthropic "
+        "API key in Settings.")
 
 
 async def _complete(cfg: dict, prompt: str, max_tokens: int) -> str:

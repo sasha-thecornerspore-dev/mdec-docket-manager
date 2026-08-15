@@ -290,6 +290,71 @@ def test_saving_settings_never_writes_a_secret_to_disk(monkeypatch):
         assert "sk-ant-oops" not in written
 
 
+# --- Claude backend selection ----------------------------------------------
+
+def _backend_cfg(pref="auto"):
+    return {"analysis": {"backend": pref, "model": "claude-opus-5"}}
+
+
+@pytest.fixture
+def backends(monkeypatch):
+    """Control what resolve_backend can see: the CLI on PATH and a stored key."""
+    from mdec.pipeline import analyzer
+
+    def setup(*, cli: bool, key: bool):
+        analyzer._claude_cli.cache_clear()   # it is lru_cached across tests
+        monkeypatch.setattr(analyzer.shutil, "which",
+                            lambda name: r"C:\claude.exe" if cli else None)
+        monkeypatch.setattr(analyzer.config, "get_secret",
+                            lambda name: "sk-ant-test" if key else None)
+        return analyzer
+    yield setup
+    from mdec.pipeline import analyzer as a
+    a._claude_cli.cache_clear()
+
+
+def test_auto_prefers_the_subscription_over_a_stored_api_key(backends):
+    """The subscription is already paid for; the API bills per token. Reaching
+    for a stored key first would silently meter work a Pro/Max plan covers."""
+    analyzer = backends(cli=True, key=True)
+    assert analyzer.resolve_backend(_backend_cfg())[0] == "cli"
+
+
+def test_auto_falls_back_to_the_api_key_when_there_is_no_cli(backends):
+    analyzer = backends(cli=False, key=True)
+    backend, cred = analyzer.resolve_backend(_backend_cfg())
+    assert (backend, cred) == ("api", "sk-ant-test")
+
+
+def test_auto_explains_itself_when_neither_backend_exists(backends):
+    analyzer = backends(cli=False, key=False)
+    with pytest.raises(analyzer.AnalyzerNotConfigured, match="Claude Code CLI"):
+        analyzer.resolve_backend(_backend_cfg())
+
+
+@pytest.mark.parametrize("pref,cli,key,expected", [
+    ("subscription", True, True, "cli"),
+    ("api", True, True, "api"),
+])
+def test_an_explicit_backend_is_never_silently_swapped(backends, pref, cli, key,
+                                                       expected):
+    """Forcing a backend must fail loudly rather than quietly use the other —
+    the user may be choosing deliberately for cost or for privacy."""
+    analyzer = backends(cli=cli, key=key)
+    assert analyzer.resolve_backend(_backend_cfg(pref))[0] == expected
+
+
+@pytest.mark.parametrize("pref,cli,key,match", [
+    ("subscription", False, True, "not found on PATH"),
+    ("api", True, False, "no Anthropic API key"),
+])
+def test_a_forced_backend_that_is_unavailable_raises(backends, pref, cli, key,
+                                                     match):
+    analyzer = backends(cli=cli, key=key)
+    with pytest.raises(analyzer.AnalyzerNotConfigured, match=match):
+        analyzer.resolve_backend(_backend_cfg(pref))
+
+
 def test_scheduled_checks_are_off_by_default(monkeypatch):
     """The portal fingerprints automated browsers, so a fresh install must not
     start hitting it on a timer."""
