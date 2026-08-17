@@ -844,8 +844,15 @@ def test_pre_approval_survives_a_corrupt_preferences_file(dump):
     assert br.allow_automatic_downloads(str(dump)) is True
 
 
-def test_prepare_downloads_reports_an_unwritable_folder():
-    """Better to fail before the first click than 400 documents in."""
+def test_prepare_downloads_reports_an_unwritable_folder(dump):
+    """Better to fail before the first click than 400 documents in.
+
+    The unwritable path is a directory *inside a regular file*, which no
+    operating system will create. The previous "Z:/definitely/not/writable"
+    only worked on Windows: on POSIX, `Z:` is a perfectly legal relative
+    directory name, so the folder was created, the check passed, and the test
+    asserted the opposite of what happened.
+    """
     import asyncio
     from mdec.portal import browser as br
 
@@ -853,7 +860,10 @@ def test_prepare_downloads_reports_an_unwritable_folder():
         async def new_cdp_session(self, _page):
             raise AssertionError("must not reach CDP when the folder is bad")
 
-    bad = "Z:/definitely/not/writable/mdec"
+    blocker = Path(dump) / "not-a-directory"
+    blocker.write_text("a file where a folder would have to go", encoding="utf-8")
+    bad = str(blocker / "mdec")
+
     r = asyncio.run(br.prepare_downloads(Ctx(), object(), bad))
     assert r["folder_ready"] is False
     assert "Cannot write" in r["detail"]
