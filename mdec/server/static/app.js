@@ -116,6 +116,16 @@ async function loadStatus() {
   $('#caseNumber').textContent = s.case.case_number || 'No case yet';
   $('#caseCourt').textContent = s.case.court || '';
 
+  // /api/status has always carried the version and nothing ever showed it.
+  // "Which build produced this archive?" is a reasonable question to ask of a
+  // tool that downloads court records, and the answer should not require
+  // opening an installer.
+  const ver = $('#appVersion');
+  if (ver && s.version) {
+    ver.textContent = 'v' + s.version;
+    ver.title = 'MDEC Docket Manager ' + s.version;
+  }
+
   // case switcher
   const sw = $('#caseSwitch');
   sw.innerHTML = (s.cases || []).map(c =>

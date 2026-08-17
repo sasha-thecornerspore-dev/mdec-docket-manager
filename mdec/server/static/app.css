@@ -82,6 +82,13 @@ body {
   color: var(--ink-soft); letter-spacing: 0.04em;
 }
 .case-line .sep { margin: 0 0.5rem; color: var(--rule); }
+/* Quieter than the case identity beside it: useful in a bug report, not
+   something to read every day. Empty until /api/status answers, and the
+   separator before it is hidden with it so a blank build shows no stray slash. */
+.case-line .app-version { color: var(--rule); }
+.case-line .app-version:empty,
+.case-line .app-version:empty + .sep,
+.case-line .sep:has(+ .app-version:empty) { display: none; }
 .topbar-actions { display: flex; align-items: center; gap: 0.5rem; }
 
 .state {

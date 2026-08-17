@@ -1,0 +1,82 @@
+# Runs the test suite on every push and pull request.
+#
+# The suite is pure logic — fingerprint/diff, catalog naming, the
+# occurrence-counted repair rename, email-code extraction, backend selection,
+# and the DB layer. No network, no browser, no API key, so it runs anywhere.
+#
+# There is deliberately no scheduled-check or portal test here. The portal
+# fingerprints automated browsers, and a CI job that logged into a real court
+# system would be both unreliable and a bad idea.
+
+name: test
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  pytest:
+    name: ${{ matrix.os }} / Python ${{ matrix.python-version }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      # Report every failure rather than the first: when something breaks you
+      # want to know whether it broke everywhere or only on one platform.
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+        python-version: ["3.12", "3.13"]
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: pip
+          cache-dependency-path: requirements.txt
+
+      - name: Install
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r requirements.txt
+          python -m pip install pytest
+
+      - name: Test
+        run: python -m pytest -q
+
+  build:
+    # Proves the installer still builds, which source tests cannot tell you --
+    # and does it in a venv, because tools/build_installer.py refuses to freeze
+    # from a shared interpreter. Windows only: the installer is Inno Setup, and
+    # Inno Setup is Windows. The exe itself is built here without it.
+    name: windows-latest / frozen build
+    runs-on: windows-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Build in a clean virtual environment
+        run: |
+          python -m venv .venv
+          .venv\Scripts\python -m pip install --upgrade pip
+          .venv\Scripts\python -m pip install -r requirements.txt
+          .venv\Scripts\python -m pip install pyinstaller
+          .venv\Scripts\python tools/build_installer.py --no-installer
+
+      - name: Confirm the exe exists and reports its version
+        run: |
+          $exe = "build_dist\MDECDocketManager\MDECDocketManager.exe"
+          if (-not (Test-Path $exe)) { throw "no exe at $exe" }
+          $size = [math]::Round((Get-Item $exe).Length / 1MB, 1)
+          Write-Output "built $exe ($size MB)"

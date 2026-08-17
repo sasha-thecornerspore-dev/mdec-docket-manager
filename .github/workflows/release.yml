@@ -1,0 +1,141 @@
+# Builds and publishes a release when a v* tag is pushed.
+#
+# Windows gets the full treatment: a frozen app, an Inno Setup installer, and a
+# portable zip -- the same artefacts tools/build_installer.py has always
+# produced locally, now built on a clean runner instead of a developer machine.
+#
+# macOS gets the frozen app as a tarball and nothing more. Inno Setup is
+# Windows-only, and this app has never been signed or notarised for macOS, so a
+# .dmg would be a download that Gatekeeper refuses to open. A tarball is honest
+# about what it is. The first tag to run this proves the macOS build; until then
+# treat that job as unverified.
+#
+# Both build inside a virtual environment because tools/build_installer.py
+# refuses to freeze from a shared interpreter -- PyInstaller bundles whatever it
+# can import, and a runner's system Python is not a controlled input.
+
+name: release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write # create the release and upload assets
+
+jobs:
+  verify-tag:
+    # A tag that disagrees with __version__ produces a release whose assets are
+    # named one thing and report another. Catch it before anything is built.
+    name: verify the tag matches __version__
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.check.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+      - id: check
+        shell: bash
+        run: |
+          tag="${GITHUB_REF_NAME#v}"
+          src=$(python -c "import re,pathlib; print(re.search(r'__version__\s*=\s*[\"\047]([^\"\047]+)', pathlib.Path('mdec/__init__.py').read_text()).group(1))")
+          echo "tag=$tag  __version__=$src"
+          if [ "$tag" != "$src" ]; then
+            echo "::error::tag v$tag does not match mdec/__init__.py __version__=$src"
+            exit 1
+          fi
+          echo "version=$tag" >> "$GITHUB_OUTPUT"
+
+  standalone:
+    name: ${{ matrix.label }}
+    needs: verify-tag
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-latest
+            label: windows-x64
+          - os: macos-latest
+            label: macos-arm64
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Inno Setup (Windows installer only)
+        if: runner.os == 'Windows'
+        run: choco install innosetup -y --no-progress
+
+      - name: Create the build environment
+        shell: bash
+        run: |
+          python -m venv .venv
+          if [ "$RUNNER_OS" = "Windows" ]; then PY=.venv/Scripts/python; else PY=.venv/bin/python; fi
+          $PY -m pip install --upgrade pip
+          $PY -m pip install -r requirements.txt
+          $PY -m pip install pyinstaller
+
+      - name: Build (Windows — app, installer, portable zip)
+        if: runner.os == 'Windows'
+        run: .venv\Scripts\python tools/build_installer.py
+
+      - name: Build (macOS — frozen app only)
+        if: runner.os == 'macOS'
+        # Straight to PyInstaller: build_installer.py's later steps are the
+        # Inno Setup installer and a Windows-shaped zip.
+        run: |
+          .venv/bin/python -m PyInstaller tools/mdec.spec --noconfirm \
+            --distpath build_dist --workpath build_work
+
+      - name: Collect the artefacts
+        shell: bash
+        env:
+          VERSION: ${{ needs.verify-tag.outputs.version }}
+          LABEL: ${{ matrix.label }}
+        run: |
+          mkdir -p staging
+          if [ "$RUNNER_OS" = "Windows" ]; then
+            # build_installer.py already wrote Setup.exe and the portable zip.
+            cp dist/*.exe dist/*.zip staging/
+          else
+            test -d "build_dist/MDECDocketManager" \
+              || { echo "PyInstaller left nothing in build_dist/"; exit 1; }
+            tar -czf "staging/MDEC-Docket-Manager-${VERSION}-${LABEL}.tar.gz" \
+              -C build_dist MDECDocketManager
+          fi
+          ls -la staging
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.label }}
+          path: staging/*
+          if-no-files-found: error
+
+  publish:
+    name: publish the release
+    needs: [verify-tag, standalone]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          path: assets
+          merge-multiple: true
+      - name: Publish
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          VERSION: ${{ needs.verify-tag.outputs.version }}
+        run: |
+          ls -la assets
+          # Create on the first run for this tag; upload on a re-run, so a
+          # retry after one leg failed does not need the release deleting.
+          if gh release view "v${VERSION}" >/dev/null 2>&1; then
+            gh release upload "v${VERSION}" assets/* --clobber
+          else
+            gh release create "v${VERSION}" assets/* \
+              --title "MDEC Docket Manager ${VERSION}" \
+              --generate-notes
+          fi

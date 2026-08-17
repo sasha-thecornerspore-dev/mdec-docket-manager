@@ -6,6 +6,7 @@
 # every launch, which would undo the 3-second start-up this app was tuned for.
 # The installer hides the directory anyway.
 
+import sys
 from pathlib import Path
 
 from PyInstaller.utils.hooks import collect_all, collect_submodules
@@ -35,8 +36,6 @@ for pkg in ("uvicorn", "keyring", "playwright", "anthropic"):
 
 hiddenimports += collect_submodules("mdec")
 hiddenimports += [
-    "keyring.backends.Windows",
-    "win32ctypes.core",
     "encodings.idna",
     "email.mime.text",           # imap-tools
     "imap_tools",
@@ -44,6 +43,18 @@ hiddenimports += [
     "PIL.Image",
     "tkinter", "tkinter.filedialog",   # the folder picker
 ]
+
+# keyring picks its backend through entry points, so the one for THIS platform
+# has to be named explicitly. Naming the Windows backend unconditionally, as
+# this spec used to, means a macOS or Linux build asks PyInstaller for modules
+# that cannot exist there — a warning, not an error, so it fails later and
+# quietly, at the point the app first tries to read a credential.
+if sys.platform == "win32":
+    hiddenimports += ["keyring.backends.Windows", "win32ctypes.core"]
+elif sys.platform == "darwin":
+    hiddenimports += ["keyring.backends.macOS"]
+else:
+    hiddenimports += ["keyring.backends.SecretService", "keyring.backends.chainer"]
 
 a = Analysis(
     [str(ROOT / "tools" / "frozen_entry.py")],
@@ -67,6 +78,12 @@ a = Analysis(
     optimize=0,
 )
 
+def _icon():
+    name = "mdec.icns" if sys.platform == "darwin" else "mdec.ico"
+    path = ROOT / "assets" / name
+    return str(path) if path.is_file() else None
+
+
 pyz = PYZ(a.pure)
 
 exe = EXE(
@@ -85,7 +102,10 @@ exe = EXE(
     target_arch=None,
     codesign_identity=None,
     entitlements_file=None,
-    icon=str(ROOT / "assets" / "mdec.ico"),
+    # .ico is a Windows format. macOS wants .icns and rejects the rest, so use
+    # one if it has been generated and go iconless rather than failing the
+    # build over decoration.
+    icon=_icon(),
     version=None,
 )
 
