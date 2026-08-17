@@ -205,4 +205,11 @@ browser, and no API key.
 
 ## License
 
-MIT — see [LICENSE](LICENSE).
+MIT — see [LICENSE](LICENSE). The standalone builds redistribute third-party
+libraries under their own terms; see [docs/THIRD-PARTY.md](docs/THIRD-PARTY.md).
+
+The "not legal advice" disclaimer above used to live at the bottom of LICENSE.
+It was moved here because appending it to the MIT text dropped the file below
+the similarity threshold GitHub uses to identify a licence, so the repository
+reported "Other" and showed no MIT badge. The disclaimer is unchanged and still
+binding; only its location moved.
