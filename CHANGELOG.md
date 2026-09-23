@@ -9,6 +9,8 @@ Notable changes to MDEC Docket Manager. The format follows
 
 ## [Unreleased]
 
+## [1.7.0] — 2026-09-23
+
 ### Added
 
 - **A completeness audit.** Compares three things that drift apart quietly:
@@ -68,6 +70,33 @@ Notable changes to MDEC Docket Manager. The format follows
 - Tests for backend selection — seven cases over precedence, fallback, and both
   forced modes. The precedence test fails against the old ordering.
 - This changelog.
+- **A release pipeline that can actually publish.** `release.yml` had never run
+  for a tag, and five things stood between it and a usable release: it
+  downloaded artefacts into the tracked `assets/` directory and would have
+  published `mdec.ico`, `mdec-256.png` and `installer_after.txt` as release
+  assets; `publish` depended on an unproven macOS leg, so one failing leg meant
+  a successful Windows installer was built and never attached; nothing waited
+  for the tests, so a tag could publish over a red suite; there was no checksum
+  step at all, which matters because the installer is unsigned and the SHA-256
+  is therefore the only thing a downloader can check; and the tag-verification
+  job ran a bare `python` with no pinned interpreter. Releases now carry
+  `SHA256SUMS.txt` with the verification commands inlined in the notes.
+- `docs/THIRD-PARTY.md` — what the standalone builds actually redistribute,
+  derived from a built tree rather than `requirements.txt`, because a
+  permissively licensed wheel can carry a differently licensed binary inside it.
+  Also records that the spec's `ocrmypdf`/`pikepdf` exclusion is what keeps AGPL
+  Ghostscript out of the binary, and is a licence control rather than only a
+  size one.
+
+### Removed
+
+- **The macOS release leg.** It was added unproven and it should not ship. This
+  app is Windows-only in source, not merely unsigned elsewhere: the Playwright
+  path resolution, the browser-on-disk check, the app window, the data directory
+  and the error dialog all assume Windows, so the artefact would have been an
+  unsigned, iconless folder that cannot find or install the browser it exists to
+  drive — failing quietly while doing it. macOS becomes its own milestone once
+  those grow real platform branches.
 
 ## [1.6.0] — 2026-08-13 — harvesting works
 
