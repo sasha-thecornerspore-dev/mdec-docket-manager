@@ -26,7 +26,7 @@ from datetime import datetime
 from pathlib import Path
 
 from . import config, db
-from .pipeline import adopt, analyzer, ocr, rag_export, renamer
+from .pipeline import adopt, analyzer, audit, ocr, rag_export, renamer
 from .portal import browser as br
 from .portal import docket, downloader, login
 
@@ -175,8 +175,10 @@ class Monitor:
             known = db.known_fingerprints(case["id"])
             new = docket.diff_new(entries, known)
 
+            # Numbered chronologically, not in page order, so the catalog
+            # sequence and the date in each filename tell the same story.
             base = db.max_seq(case["id"])
-            for i, e in enumerate(new):
+            for i, e in enumerate(renamer.filing_order(new)):
                 e["seq"] = base + 1 + i
                 e["has_documents"] = e.get("button_index") is not None
                 e["id"] = db.insert_entry(case["id"], e)
@@ -240,6 +242,10 @@ class Monitor:
                     watch_dir=staging,
                 )
                 for entry, res in zip(fresh, results):
+                    if res.expected:
+                        # What the popup offered, so a later audit can tell a
+                        # single-PDF entry from one that dropped attachments.
+                        db.set_entry_expected_docs(entry["id"], res.expected)
                     if res.status in ("view_only", "no_modal"):
                         db.set_entry_doc_status(entry["id"], "view_only")
                         warnings.append(f"#{entry['seq']:04d} {entry['name']}: "
@@ -272,13 +278,24 @@ class Monitor:
                     if res.status == "error":
                         warnings.append(f"#{entry['seq']:04d}: partial — {res.error}")
 
+            # Say whether the archive is now complete, every time. A run that
+            # reports "3 downloaded" without mentioning that 11 are still
+            # missing is exactly the quiet half-success this app exists to
+            # avoid. Hashing is skipped so the check stays fast; the Audit
+            # button does the full pass.
+            report = audit.reconcile(db, case["id"], folder,
+                                     hash_duplicates=False)
+            log(report["verdict"])
+
             status = "warning" if warnings else "ok"
             db.finish_run(run_id, status, len(new), new_docs,
-                          "\n".join(warnings) if warnings else "")
+                          "\n".join([report["verdict"], *warnings]))
             log(f"Done: {len(new)} new entries, {new_docs} downloaded, "
                 f"{adopted['adopted']} adopted")
             return {"ok": True, "new_entries": len(new), "new_documents": new_docs,
-                    "adopted": adopted["adopted"], "warnings": warnings}
+                    "adopted": adopted["adopted"], "warnings": warnings,
+                    "coverage": report["summary"]["coverage"],
+                    "verdict": report["verdict"]}
 
         except (br.NotLoggedIn, br.BrowserMissing, br.BrowserBusy,
                 login.LoginFailed) as exc:
@@ -560,6 +577,51 @@ class Monitor:
             msg = (f"Nothing new to adopt — all {r['files_seen']} catalog-named "
                    f"file(s) are already recorded.")
         return {"ok": True, "message": msg, **r}
+
+    def _case_folder(self, case: dict) -> Path:
+        return Path(case["downloads"] or
+                    config.default_case_folder(case["case_number"]))
+
+    async def audit_case(self, case_id: int | None = None,
+                         hash_duplicates: bool = True) -> dict:
+        """Three-way audit: docket vs database vs folder.
+
+        Run off the event loop — a full pass hashes same-sized files, and case
+        folders often sit on a network drive.
+        """
+        case = self._resolve_case(case_id)
+        if not case:
+            return {"ok": False, "message": "No case selected."}
+        folder = self._case_folder(case)
+        loop = asyncio.get_running_loop()
+        report = await loop.run_in_executor(
+            None, lambda: audit.reconcile(db, case["id"], folder,
+                                          hash_duplicates=hash_duplicates))
+        return {"ok": True, "message": report["verdict"],
+                "case_number": case["case_number"], **report}
+
+    async def quarantine_duplicates(self, case_id: int | None = None,
+                                    dry_run: bool = True) -> dict:
+        """Move redundant copies of the same entry aside. Dry run by default."""
+        case = self._resolve_case(case_id)
+        if not case:
+            return {"ok": False, "message": "No case selected."}
+        folder = self._case_folder(case)
+        loop = asyncio.get_running_loop()
+
+        def work() -> list[dict]:
+            groups = audit.inventory(folder)["duplicates"]
+            return audit.quarantine_duplicates(folder, groups, dry_run=dry_run)
+
+        actions = await loop.run_in_executor(None, work)
+        if not actions:
+            return {"ok": True, "actions": [], "dry_run": dry_run,
+                    "message": "No redundant copies of the same entry found."}
+        verb = "would be moved" if dry_run else "moved"
+        return {"ok": True, "actions": actions, "dry_run": dry_run,
+                "message": (f"{len(actions)} duplicate file(s) {verb} to "
+                            f"_duplicates. Identical files belonging to "
+                            f"different entries were left alone.")}
 
     async def analyze_entry_now(self, entry_id: int) -> dict:
         cfg = config.load_config()

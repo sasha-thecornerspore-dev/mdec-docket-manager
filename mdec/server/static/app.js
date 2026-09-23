@@ -828,6 +828,107 @@ $('#btnDiagnose').addEventListener('click', async () => {
   finally { b.disabled = false; b.textContent = 'Why did my check find nothing?'; }
 });
 
+/* --- completeness audit ------------------------------------------------- */
+
+const AUDIT_CELLS = [
+  ['complete',  'On disk'],
+  ['missing',   'Missing'],
+  ['partial',   'Partial'],
+  ['broken',    'Broken'],
+  ['view_only', 'View-only'],
+];
+
+function renderAudit(r) {
+  const s = r.summary, inv = r.inventory || {};
+  $('#auditVerdict').textContent = r.verdict;
+  $('#auditVerdict').classList.toggle('is-bad', !r.verdict.startsWith('Complete'));
+
+  const cells = AUDIT_CELLS.map(([k, label]) => [label, s[k], k !== 'complete'
+    && k !== 'view_only' && s[k] > 0]);
+  cells.push(['Coverage', s.coverage + '%', s.coverage < 100]);
+  const tally = $('#auditTally');
+  tally.hidden = false;
+  tally.innerHTML = cells.map(([k, n, alert]) =>
+    `<div class="tally-cell${alert ? ' is-alert' : ''}">
+       <div class="tally-n">${esc(n)}</div>
+       <div class="tally-k">${esc(k)}</div></div>`).join('');
+
+  // Problems first, then the folder-level notes that have no entry to sit on.
+  let out = '';
+  if (r.trouble.length) {
+    out += `<p class="hint">Entries that need attention:</p>` +
+      r.trouble.slice(0, 100).map(t =>
+        `<div class="r-row r-unmatched">
+           <span>#${String(t.seq).padStart(4, '0')}</span>
+           <span>${esc(t.name || '(unnamed)')}</span>
+           <span>${esc(t.detail)}</span></div>`).join('');
+  }
+  const notes = [];
+  if (inv.unfiled_count)
+    notes.push(`${inv.unfiled_count} file(s) in the folder don't follow the
+      catalog convention yet — run the repair rename in Settings to give them
+      sequences and dates.`);
+  if (r.orphan_count)
+    notes.push(`${r.orphan_count} catalog-named file(s) have no matching docket
+      entry. Left alone.`);
+  if (inv.undated_count)
+    notes.push(`${inv.undated_count} filename(s) carry XXXXXXXX because the
+      docket date could not be read.`);
+  if (inv.collision_count)
+    notes.push(`${inv.collision_count} filename(s) end in ~2 or higher, meaning
+      a name was already taken. Nothing was overwritten.`);
+  if (inv.zero_byte?.length)
+    notes.push(`${inv.zero_byte.length} zero-byte file(s) — failed downloads
+      wearing a document's name.`);
+  if (inv.duplicate_groups)
+    notes.push(`${inv.duplicate_groups} group(s) of byte-identical files
+      (${inv.redundant_groups} of them redundant copies of one entry).`);
+  if (notes.length)
+    out += `<ul class="checklist">` +
+      notes.map(n => `<li>${esc(n.replace(/\s+/g, ' '))}</li>`).join('') + `</ul>`;
+  $('#auditOut').innerHTML = out;
+  $('#btnDupes').hidden = !inv.redundant_groups;
+}
+
+$('#btnAudit').addEventListener('click', async () => {
+  const b = $('#btnAudit');
+  b.disabled = true; b.textContent = 'Auditing…';
+  try {
+    const r = await api('/actions/audit', { method: 'POST' });
+    if (!r.ok) { toast(r.message, true); return; }
+    renderAudit(r);
+    toast(r.verdict, !r.verdict.startsWith('Complete'));
+  } catch (e) { toast(e.message, true); }
+  finally { b.disabled = false; b.textContent = 'Audit this case'; }
+});
+
+/** Dry run first, always: moving court documents is not a one-click action. */
+$('#btnDupes').addEventListener('click', async () => {
+  const b = $('#btnDupes');
+  b.disabled = true;
+  try {
+    const r = await api('/actions/quarantine-duplicates', {
+      method: 'POST', body: JSON.stringify({ dry_run: true }) });
+    if (!r.actions.length) { toast(r.message); return; }
+    $('#auditOut').innerHTML =
+      `<p class="hint">These are extra copies of an entry the app already has.
+         Identical files belonging to <em>different</em> entries are not listed —
+         each entry keeps its own copy.</p>` +
+      r.actions.map(a => `<div class="r-row">
+          <span>move</span><span>${esc(a.file)}</span>
+          <span>keeping ${esc(a.keep)}</span></div>`).join('') +
+      `<div class="toolbar"><button id="btnDupesGo" class="btn btn-primary">
+         Move ${r.actions.length} file(s) to _duplicates</button></div>`;
+    $('#btnDupesGo').addEventListener('click', async () => {
+      const go = await api('/actions/quarantine-duplicates', {
+        method: 'POST', body: JSON.stringify({ dry_run: false }) });
+      toast(go.message, !go.ok);
+      $('#btnAudit').click();
+    });
+  } catch (e) { toast(e.message, true); }
+  finally { b.disabled = false; }
+});
+
 $('#btnAdopt').addEventListener('click', async () => {
   const b = $('#btnAdopt');
   b.disabled = true; b.textContent = 'Scanning…';
@@ -915,8 +1016,15 @@ async function repair(dryRun) {
       `${s.rename} to rename, ${s.unmatched} unmatched, ${s.missing} docket ` +
       `slots with no file. Review unmatched and missing by hand — for court ` +
       `documents a wrong label is worse than no label.</p>` +
+      (s.ambiguous ? `<p class="hint"><strong>${s.ambiguous} of the ${s.rename}
+         renames are marked “order”.</strong> Those titles occur more than once
+         on the docket, so which copy gets which date is decided by the order
+         the files were downloaded in. If that order wasn't docket order, they
+         can be wrong without looking wrong — spot-check a few against the
+         portal before relying on their dates.</p>` : '') +
       r.actions.map(a => `<div class="r-row r-${a.status}">
-        <span>${esc(a.status)}</span><span>${esc(a.file || '—')}</span>
+        <span>${esc(a.ambiguous ? 'order' : a.status)}</span>
+        <span>${esc(a.file || '—')}</span>
         <span>${esc(a.target || '—')}</span></div>`).join('');
     toast(dryRun ? `Dry run: ${s.rename} file(s) would be renamed.`
                  : `Renamed ${s.rename} file(s).`);

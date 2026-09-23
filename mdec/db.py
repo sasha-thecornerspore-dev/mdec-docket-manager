@@ -39,6 +39,7 @@ CREATE TABLE IF NOT EXISTS entries (
     fingerprint TEXT NOT NULL,
     has_documents INTEGER DEFAULT 0,
     doc_status TEXT DEFAULT 'pending',
+    expected_docs INTEGER,
     first_seen TEXT NOT NULL,
     UNIQUE(case_id, fingerprint)
 );
@@ -103,6 +104,7 @@ _ADDED_COLUMNS = (
     ("cases", "downloads", "TEXT DEFAULT ''"),
     ("cases", "monitor_enabled", "INTEGER DEFAULT 1"),
     ("entries", "doc_status", "TEXT DEFAULT 'pending'"),
+    ("entries", "expected_docs", "INTEGER"),
 )
 
 
@@ -245,6 +247,17 @@ def set_entry_doc_status(entry_id: int, status: str) -> None:
     """'pending' | 'ok' | 'view_only' | 'error' — drives gap-filling."""
     with conn() as c:
         c.execute("UPDATE entries SET doc_status=? WHERE id=?", (status, entry_id))
+
+
+def set_entry_expected_docs(entry_id: int, n: int) -> None:
+    """How many files the entry's popup offered.
+
+    Recorded when the popup is opened, because that is the only moment the
+    count is visible. Without it a multi-file entry that dropped half its
+    attachments looks identical to one that was always a single PDF.
+    """
+    with conn() as c:
+        c.execute("UPDATE entries SET expected_docs=? WHERE id=?", (n, entry_id))
 
 
 def entries_missing_documents(case_id: int) -> list[dict]:

@@ -110,6 +110,63 @@ portal didn't give one), then the document title. Entries with several files get
 `_1of14`, `_2of14`, … suffixes. The manifest records every original name, so any
 rename can be undone.
 
+`NNNN` follows the **filing date**, not the order the portal happens to render
+the page in, so a folder sorted by filename is also sorted by time.
+
+Then press **Audit this case** — that is the check that matters.
+
+---
+
+## 1b. Knowing you have everything
+
+Downloading is the easy half. The hard half is knowing that what is in the
+folder is what the court actually has, and three things drift apart quietly: the
+docket, the app's database, and the files on disk. A document you believe you
+have and don't is the one you find out about in a hearing.
+
+**Dashboard → Completeness → Audit this case** compares all three and answers in
+one sentence:
+
+> Complete: all 300 document-bearing entries are on disk, named and dated.
+
+or
+
+> Incomplete: 11 entry(ies) never downloaded; 2 partly downloaded. 287 of 300
+> entries are accounted for (96%). Run a check to fetch the rest.
+
+Every entry lands in one state:
+
+| State | Meaning | What to do |
+|---|---|---|
+| **complete** | every file the docket offered is on disk, non-empty | nothing |
+| **partial** | the popup offered 14 attachments, fewer arrived | run a check; it retries |
+| **missing** | the docket offers a document, nothing was fetched | run a check |
+| **broken** | recorded as downloaded, but gone from the folder or zero bytes | restore from backup, or run a check |
+| **view-only** | the portal shows the entry with nothing to download | nothing — normal |
+| **none** | a text-only docket line | nothing |
+
+The audit also reports what has no entry to attach to: files that don't follow
+the catalog convention yet, catalog-named files whose sequence matches no entry
+(orphans), filenames stamped `XXXXXXXX` because the date couldn't be read, names
+ending `~2` where a name was already taken, zero-byte files, and byte-identical
+duplicates.
+
+Every check ends with the same verdict in its run log, so you never have to ask.
+
+### Duplicates, and why most of them should stay
+
+Identical content is not the same as redundancy, and the difference decides
+whether a copy is safe to remove:
+
+- **Same entry, fetched twice** — redundant. Offered under **Review duplicate
+  copies**, which moves the extras into a `_duplicates` subfolder. It never
+  deletes, and it always shows you the list before moving anything.
+- **One exhibit filed under two entries** — *not* redundant. Both entries are
+  entitled to their own copy; removing one would leave a docket entry pointing
+  at a file named for a different entry. These are reported and left alone.
+- **Not named yet** — ownership is unknown, so nothing is touched. Run the
+  repair rename first.
+
 Cross-check the count against the Documents tab. If they disagree, see
 [TROUBLESHOOTING.md](TROUBLESHOOTING.md#counts-dont-match).
 
@@ -401,6 +458,17 @@ matching depends on.
 - **unmatched** — more copies of a title on disk than docket slots expecting it.
   Left untouched.
 - **missing** — a docket slot with no file, i.e. a download that never landed.
+- **order** — a rename whose correctness depends on the folder order being
+  docket order, because that title occurs more than once. A unique title cannot
+  be placed wrongly; a repeated one can, and it will not look wrong afterwards.
+
+That last one is worth taking seriously on a big folder: in the reference case
+250 of 308 files carried a repeated title, so four names in five were decided by
+position alone. Spot-check a few against the portal before relying on their
+dates — or, if the folder came from somewhere you can't vouch for the order of,
+point the case at a fresh folder and harvest instead. A harvest is slower but
+deterministic: the downloader knows which entry each file came from and never
+has to infer it.
 
 Both are left alone deliberately. For court documents a wrong label is worse than
 no label, so review these by hand rather than forcing a match.

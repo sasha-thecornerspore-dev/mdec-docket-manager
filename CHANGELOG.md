@@ -9,7 +9,44 @@ Notable changes to MDEC Docket Manager. The format follows
 
 ## [Unreleased]
 
+### Added
+
+- **A completeness audit.** Compares three things that drift apart quietly:
+  what the docket offers, what the database recorded, and what is actually in
+  the folder. Every entry gets a state — `complete`, `partial`, `missing`,
+  `broken`, `view_only` or `none` — and the case gets one plain sentence saying
+  whether the archive is whole. On the Dashboard, and at
+  `POST /api/actions/audit`.
+- **Entries remember how many files their popup offered** (`expected_docs`,
+  recorded before the first click, because that is the only moment the count is
+  visible). Without it a filing that dropped five of its fourteen attachments
+  was indistinguishable from one that was always a single PDF.
+- **Duplicate detection that knows what a duplicate means.** Byte-identical
+  files are grouped and classified: `entry` (the same entry fetched twice —
+  redundant), `cross` (one exhibit genuinely filed under two entries — both
+  copies are legitimate), or `unfiled` (not named yet, so ownership is unknown).
+  Only `entry` groups can be quarantined, and quarantining moves files into
+  `_duplicates` rather than deleting them. Hashing only touches files that
+  already share an exact size.
+- **Order-dependent renames are labelled.** A repair rename of a legacy folder
+  places a repeated title by position alone, so it can be wrong without looking
+  wrong. Those renames are now marked `order` and counted separately. In the
+  reference folder that is 250 of 308 files.
+- `tests/test_audit.py` — the harvest pipeline end to end with only the
+  Playwright calls stubbed: numbering, naming, dating, multi-file entries,
+  duplicates, adoption, and every audit state. 22 tests.
+
 ### Changed
+
+- **Catalog numbers are assigned by filing date, not page order.** The portal
+  lists scheduled hearings ahead of docket entries and is not internally sorted,
+  so `NNNN` and the `YYYYMMDD` in the filename used to disagree — which meant a
+  folder sorted by name was not sorted by time. Entries whose date will not
+  parse keep their page position and sort last. Numbering stays stable: only
+  new entries are numbered, and they are appended.
+- **Every check now ends by saying whether the archive is complete**, in the run
+  log and in the response. A run that reported "3 downloaded" while eleven were
+  still missing was the quiet half-success this app exists to avoid.
 
 - **"Auto" now prefers your Claude subscription over a stored API key.** Both
   backends already existed, but auto reached for the key first, so anyone who

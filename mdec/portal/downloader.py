@@ -35,6 +35,7 @@ class SessionRefresh(Exception):
 @dataclass
 class EntryDownload:
     button_index: int
+    expected: int = 0        # download buttons the modal offered
     status: str = "ok"            # 'ok' | 'view_only' | 'no_modal' | 'error'
     files: list[dict] = field(default_factory=list)  # {title, path, sha256, size}
     error: str = ""
@@ -137,6 +138,9 @@ async def download_entry(page, button_index: int, dest_dir: Path,
         return result
 
     dl_buttons = await modal.query_selector_all('[aria-label*="Download document"]')
+    # Recorded before any click: the only moment the true attachment count
+    # is visible. A later audit compares it with what reached the disk.
+    result.expected = len(dl_buttons)
     for b in dl_buttons:
         label = (await b.get_attribute("aria-label")) or ""
         title = label.replace("Download document", "").strip()

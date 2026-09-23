@@ -486,3 +486,13 @@ main { padding: var(--gut) 1.5rem 4rem; max-width: 1500px; }
 @media (prefers-reduced-motion: reduce) {
   * { animation-duration: 0.01ms !important; transition-duration: 0.01ms !important; }
 }
+
+/* Completeness verdict — one sentence, readable at a glance. */
+.verdict {
+  margin: 0.4rem 0 0.8rem;
+  padding: 0.6rem 0.8rem;
+  border-left: 3px solid var(--verify);
+  background: var(--paper-2);
+  font-size: 0.95rem;
+}
+.verdict.is-bad { border-left-color: var(--amber); }

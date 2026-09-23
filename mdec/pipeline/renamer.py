@@ -55,6 +55,27 @@ def date_stamp(file_date: str) -> str:
         return "XXXXXXXX"
 
 
+def filing_order(entries: list[dict]) -> list[dict]:
+    """Entries in the order catalog numbers should be assigned: chronological.
+
+    The portal renders its sections in its own order — scheduled hearings ahead
+    of docket entries, which are themselves not strictly sorted — so page order
+    is neither chronological nor stable between renders. Numbering by filing
+    date instead makes NNNN and YYYYMMDD agree, which is the whole reason a
+    folder sorted by filename is also sorted by time.
+
+    Entries whose date will not parse keep their page position and sort last,
+    so one unreadable date can never quietly reorder the archive around it.
+    Ties keep page order, which makes the sort stable and repeatable.
+    """
+    def key(pair: tuple[int, dict]) -> tuple:
+        i, e = pair
+        stamp = date_stamp(e.get("file_date", ""))
+        return (stamp == "XXXXXXXX", stamp, i)
+
+    return [e for _, e in sorted(enumerate(entries), key=key)]
+
+
 def catalog_name(seq: int, file_date: str, description: str,
                  part: int | None = None, total_parts: int = 1) -> str:
     base = f"{seq:04d}_{date_stamp(file_date)}_{sanitize(description)}"
@@ -117,10 +138,17 @@ def repair_folder(folder: Path, case_id: str, docket_index: list[dict],
     sort_key: override for tests; default = file creation time (st_ctime),
     which equals download order. Never sort by name or mtime.
 
-    Returns action rows: {file, target, status}. status 'unmatched' means the
-    stem had more physical copies than docket slots (or vice versa) — those are
-    left untouched and MUST be reviewed by hand; for legal documents a mislabel
-    is worse than no label.
+    Returns action rows: {file, target, status, ambiguous}. status 'unmatched'
+    means the stem had more physical copies than docket slots (or vice versa) —
+    those are left untouched and MUST be reviewed by hand; for legal documents a
+    mislabel is worse than no label.
+
+    `ambiguous` marks a rename whose correctness depends on the folder's order
+    matching docket order: the title occurs more than once, so which copy gets
+    which date is decided by position alone. A unique title cannot be placed
+    wrongly; a repeated one can, and silently. In the reference folder one title
+    occurred 50 times, so this is the difference between "checked" and "assumed"
+    and the caller is told which renames are which.
     """
     folder = Path(folder)
     files = [p for p in folder.glob("*.pdf") if not p.name.startswith("_")]
@@ -139,11 +167,13 @@ def repair_folder(folder: Path, case_id: str, docket_index: list[dict],
         seen[stem] = n + 1
         stem_slots = slots.get(stem, [])
         if n >= len(stem_slots):
-            actions.append({"file": p.name, "target": "", "status": "unmatched"})
+            actions.append({"file": p.name, "target": "", "status": "unmatched",
+                            "ambiguous": False})
             continue
         row = stem_slots[n]
         target = catalog_name(row["seq"], row.get("file_date", ""), row["title"])
-        actions.append({"file": p.name, "target": target, "status": "rename"})
+        actions.append({"file": p.name, "target": target, "status": "rename",
+                        "ambiguous": len(stem_slots) > 1})
         if not dry_run:
             target = _dedupe(folder, target)
             p.rename(folder / target)
@@ -154,7 +184,7 @@ def repair_folder(folder: Path, case_id: str, docket_index: list[dict],
         have = seen.get(stem, 0)
         for row in rows[have:]:
             actions.append({
-                "file": "", "status": "missing",
+                "file": "", "status": "missing", "ambiguous": False,
                 "target": catalog_name(row["seq"], row.get("file_date", ""), row["title"]),
             })
     return actions

@@ -425,6 +425,27 @@ async def api_adopt(case_id: int | None = None):
     return await monitor.adopt_now(case_id)
 
 
+@app.post("/api/actions/audit")
+async def api_audit(case_id: int | None = None, hash_duplicates: bool = True):
+    """Does the folder actually hold everything the docket offers?
+
+    Compares docket entries, the database, and the files on disk, and reports
+    what is missing, partial, broken, orphaned, duplicated or undated.
+    """
+    return await monitor.audit_case(case_id, hash_duplicates=hash_duplicates)
+
+
+class QuarantineIn(BaseModel):
+    dry_run: bool = True
+
+
+@app.post("/api/actions/quarantine-duplicates")
+async def api_quarantine(payload: QuarantineIn):
+    """Move redundant copies of the SAME entry into _duplicates. Never deletes,
+    and never touches an identical file that belongs to a different entry."""
+    return await monitor.quarantine_duplicates(dry_run=payload.dry_run)
+
+
 @app.post("/api/actions/pick-folder")
 async def api_pick_folder(payload: dict | None = None):
     """Open the OS folder picker. Server and browser are the same machine, so
@@ -541,6 +562,9 @@ async def api_repair_rename(payload: RepairIn):
                 "rename": sum(1 for a in actions if a["status"] == "rename"),
                 "unmatched": sum(1 for a in actions if a["status"] == "unmatched"),
                 "missing": sum(1 for a in actions if a["status"] == "missing"),
+                # Renames decided by position rather than by a unique title.
+                "ambiguous": sum(1 for a in actions
+                                 if a["status"] == "rename" and a["ambiguous"]),
             }}
 
 

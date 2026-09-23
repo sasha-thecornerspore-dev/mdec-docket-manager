@@ -17,10 +17,11 @@ run.py ──► uvicorn on 127.0.0.1:8674 ──► mdec/server/app.py (API + s
         ▼                                    ▼                               ▼
   mdec/portal/                        mdec/monitor.py                 mdec/pipeline/
   browser.py   persistent Chromium    scheduler + the check:          renamer.py   catalog naming
-  login.py     attach / managed       ensure login → parse →          ocr.py       text + OCR
-  email_code.py IMAP code reader        diff → download → rename      rag_export.py folder/webhook/chroma
-  docket.py    in-page parser           → OCR → RAG → analyze         analyzer.py  Claude (API or CLI)
-  downloader.py paced download loop      → record run
+  login.py     attach / managed       ensure login → parse →          adopt.py     take on-disk files
+  email_code.py IMAP code reader        diff → number → download      audit.py     docket vs db vs disk
+  docket.py    in-page parser           → rename → OCR → RAG          ocr.py       text + OCR
+  downloader.py paced download loop     → analyze → audit             rag_export.py folder/webhook/chroma
+                                        → record run                  analyzer.py  Claude (API or CLI)
         │                                    │                               │
         └──────────► mdec/db.py (SQLite) ◄────┴───── mdec/config.py ──────────┘
                                                    (JSON + Credential Manager)
@@ -60,7 +61,7 @@ SQLite at `%APPDATA%\MDECDocketManager\mdec.db`. The schema runs with
 | Table | Holds |
 |---|---|
 | `cases` | case number, caption, court, its own `downloads` folder, `monitor_enabled` |
-| `entries` | docket entries: `seq`, section, file date, name, comment, `raw_text`, `fingerprint`, `has_documents`, `doc_status`, `first_seen`. Unique on `(case_id, fingerprint)` |
+| `entries` | docket entries: `seq`, section, file date, name, comment, `raw_text`, `fingerprint`, `has_documents`, `doc_status`, `expected_docs`, `first_seen`. Unique on `(case_id, fingerprint)` |
 | `documents` | per file: title, filename, path, `sha256`, size, `ocr_done`, `rag_exported` |
 | `notes` | body + optional `entry_id` / `document_id` |
 | `analyses` | `kind` (`document`/`case`), model, summary, `deadlines` JSON, recommendations |
@@ -139,11 +140,24 @@ Two modes.
 downloader knows the entry, so no inference: `NNNN_YYYYMMDD_Description.pdf`,
 with `_1ofN` for multi-file entries and `XXXXXXXX` for unknown dates.
 
+`filing_order()` decides what `NNNN` means. The portal lists scheduled
+hearings ahead of docket entries and is not internally sorted, so page order
+would make the sequence and the date disagree. Numbering follows the filing
+date instead; entries whose date will not parse keep their page position and
+sort last, and ties keep page order so the sort is stable. Only new entries
+are numbered, and they are appended, so existing filenames never shift.
+
 `repair_folder()` renames a legacy dump. Sort by creation time (= download order
 = docket order), strip the `" (n)"` suffix to get the stem, map the *N*th
 physical copy of a stem to the *N*th docket slot expecting it. Reports
 `unmatched` (extra files) and `missing` (empty slots) rather than forcing a
 match, because a mislabeled court document is worse than an unlabeled one.
+
+Renames of a *repeated* title are additionally flagged `ambiguous`: a unique
+title cannot be placed wrongly, but a repeated one is placed by position
+alone, so if the folder order is not docket order it can be wrong without
+looking wrong. In the reference folder 250 of 308 files fell in this class,
+which is why it is surfaced rather than assumed away.
 
 Both append to `_ORIGINAL_NAMES_manifest.csv`, and a collision produces `~2`
 rather than an overwrite.
@@ -165,6 +179,30 @@ records the same SHA-256 and size the downloader would, and marks the entry's
 
 Legacy names carry no sequence and are deliberately *not* adopted; the repair
 rename gives them sequences first.
+
+### `pipeline/audit.py`
+The three-way reconciliation, and the only module that assumes all three sources
+can disagree: the docket (what the court offers), the database (what the app
+believes it fetched), and the folder (what is there now).
+
+`scan()` reads the folder in a single `os.scandir` pass — case folders often sit
+on a network drive, where round trips are the cost — and parses each catalog
+name. `duplicate_groups()` groups byte-identical files, hashing only within
+groups that already share an exact size, and classifies each group by scope:
+`entry` (one entry fetched twice, so the extras are redundant), `cross` (one
+exhibit genuinely filed under two entries, so both copies are legitimate), or
+`unfiled` (not yet named, so ownership is unknown). Only `entry` groups can be
+quarantined, and `quarantine_duplicates()` moves them into `_duplicates` rather
+than deleting anything.
+
+`reconcile()` classifies every entry as `complete`, `partial`, `missing`,
+`broken`, `view_only` or `none`, and produces one plain sentence. `partial`
+depends on `entries.expected_docs`, recorded by the downloader before its first
+click because that is the only moment the true attachment count is visible; a
+filing that dropped five of fourteen attachments is otherwise indistinguishable
+from one that was always a single PDF. A recorded file counts as present only if
+it is on disk *and* non-empty — a zero-byte PDF is a failed download wearing a
+document's name.
 
 ### `pipeline/ocr.py`
 Text layer first via `pdfplumber`; if under 200 characters and OCR is enabled,
@@ -275,7 +313,8 @@ scheduler / "Check now"
    ├─ login.ensure_logged_in()  ──► NotLoggedIn → run status 'warning', tell the user
    ├─ docket.parse_page()       ──► entries + fingerprints, buttons tagged
    ├─ docket.diff_new()         ──► only unseen fingerprints
-   ├─ assign seq = max_seq + 1…, db.insert_entry()
+   ├─ renamer.filing_order() ──► chronological; seq = max_seq + 1…
+   ├─ db.insert_entry()
    ├─ adopt.adopt_folder()      ──► link files already on disk; orphans reported
    ├─ db.entries_missing_documents() ──► the real work list (resume point)
    │     └─ nothing missing? finish, done
@@ -283,8 +322,10 @@ scheduler / "Check now"
    │     per file: verify on disk → renamer.place_download() → db.insert_document()
    │               → ocr.get_text() → rag_export.export_document()
    │               → analyzer.analyze_document() → db.add_analysis()
-   │     per entry: db.set_entry_doc_status('ok' | 'view_only' | 'error')
-   └─ db.finish_run(status, counts, warnings)
+   │     per entry: db.set_entry_expected_docs(n)
+   │               db.set_entry_doc_status('ok' | 'view_only' | 'error')
+   ├─ audit.reconcile()        ──► one sentence: is the archive complete?
+   └─ db.finish_run(status, counts, verdict + warnings)
 ```
 
 A scheduled sweep runs the above once per monitored case, sequentially.
@@ -313,6 +354,8 @@ A scheduled sweep runs the above once per monitored case, sequentially.
 | POST | `/api/actions/check-now` | Run a check (`?case_id=` optional) |
 | POST | `/api/actions/check-all` | Check every monitored case, sequentially |
 | POST | `/api/actions/adopt` | Link files already in the folder to entries |
+| POST | `/api/actions/audit` | Three-way completeness audit; `hash_duplicates=false` skips hashing |
+| POST | `/api/actions/quarantine-duplicates` | Move redundant copies of one entry to `_duplicates`; dry run by default |
 | POST | `/api/actions/pick-folder` | Open the OS folder picker |
 | POST | `/api/actions/analyze-entry/{id}` | Analyze one entry |
 | POST | `/api/actions/analyze-case` | Case briefing |
@@ -323,7 +366,7 @@ A scheduled sweep runs the above once per monitored case, sequentially.
 
 ## Testing
 
-`tests/test_core.py` (44 tests) covers the logic where a bug would be silent and
+`tests/test_core.py` (83 tests) covers the logic where a bug would be silent and
 consequential: fingerprint/diff (including the aliasing hazard and the
 repeated-title case), catalog naming, the occurrence-counted repair in all four
 outcomes, adopting files on disk (idempotence, orphans, zero-byte rejection),
@@ -332,6 +375,16 @@ deletion, the pre-multi-case config migration, verification-code extraction, the
 DB layer, and two safety assertions — that saving settings can't write a secret
 to disk, and that unknown secret slots are rejected. No network, no browser, no
 API key.
+
+`tests/test_audit.py` (22 tests) runs the pipeline end to end with only the
+Playwright calls stubbed, against a docket modelled on the awkward parts of the
+reference case: a repeated title, a day-first date carrying a time, a date that
+cannot be read at all, a fourteen-attachment filing, a view-only entry, and a
+docket line with no document. It asserts the properties that matter after a
+harvest rather than during one — that filename order equals date order, that a
+half-delivered entry reports `partial`, that a zero-byte file is not a
+document, that an empty docket says so instead of claiming completeness, and
+that a duplicate shared by two entries is never quarantined.
 
 Portal automation is verified by hand against the live site; the walkthrough is
 the manual test plan.

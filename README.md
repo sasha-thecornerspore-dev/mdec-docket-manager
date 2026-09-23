@@ -24,8 +24,10 @@ except the API calls you explicitly enable.
 | **Handles many cases** | Track as many as you like, each with its own folder, docket, notes, and analyses. Switch from the top bar; scheduled checks walk every monitored case in turn. |
 | **Downloads** | Pulls every document from new entries, including multi-file popups. Paced to stay under the portal's throttle. |
 | **Never starts over** | Every check first adopts files already on disk, then downloads only what's genuinely missing. An interrupted 950-document harvest resumes where it stopped; a rebuilt database re-adopts the folder instead of re-fetching it. |
-| **Names** | Files land as `NNNN_YYYYMMDD_Description.pdf` where `NNNN` is the docket sequence. Naming is deterministic — the app knows which entry each file came from. |
-| **Repairs** | Renames a legacy dump folder into the same catalog using occurrence-counted matching, with a dry run and a reversible manifest. |
+| **Names** | Files land as `NNNN_YYYYMMDD_Description.pdf`. `NNNN` is assigned by filing date, so a folder sorted by name is also sorted by time. Naming is deterministic — the app knows which entry each file came from. |
+| **Knows what it's missing** | An audit compares the docket, the database, and the folder, and says in one sentence whether the archive is whole. Per entry: complete, partial, missing, broken, or view-only. |
+| **Handles duplicates** | Byte-identical files are grouped and classified. The same entry fetched twice is redundant; one exhibit filed under two entries is not, and both copies are kept. |
+| **Repairs** | Renames a legacy dump folder into the same catalog using occurrence-counted matching, with a dry run and a reversible manifest. Renames decided by position rather than a unique title are flagged. |
 | **Notes** | Per-entry and case-level notes, kept alongside the docket. |
 | **Analyzes** | Claude summarizes each new filing, extracts dates and deadlines, and suggests next steps. Works with an **API key or your Claude subscription**. |
 | **OCR** | Optional: adds a text layer to scanned PDFs and writes a `.txt` sidecar. |
@@ -34,8 +36,8 @@ except the API calls you explicitly enable.
 
 ## Screens
 
-Seven tabs: **Dashboard** (counts, setup checklist, document folder, recent
-activity), **Docket** (the ledger — new filings are stamped and notched in the
+Seven tabs: **Dashboard** (counts, the completeness audit, setup checklist,
+document folder, recent activity), **Docket** (the ledger — new filings are stamped and notched in the
 sequence spine), **Documents** (file table), **Notes**, **Analysis**,
 **Activity** (run log), **Settings** (cases and everything else).
 
@@ -165,8 +167,8 @@ manual check has actually read your docket.
 
 Everything that doesn't touch the portal, which is most of the value on a large
 case file: **Adopt files** you downloaded yourself, catalog naming, the
-occurrence-counted repair of a legacy folder, per-entry notes, OCR, Claude
-analysis, and RAG export. Fetch the documents by hand, point a case at the
+occurrence-counted repair of a legacy folder, the completeness audit,
+duplicate detection, per-entry notes, OCR, Claude analysis, and RAG export. Fetch the documents by hand, point a case at the
 folder, and the app takes it from there.
 
 Use **"Why did my check find nothing?"** on the Dashboard to see which state
@@ -198,10 +200,18 @@ Use this only for a case you have lawful access to.
 python -m pytest tests -q
 ```
 
-44 tests cover the diffing logic, catalog naming, the occurrence-counted repair
-rename, adopting files already on disk, resume/gap tracking, case isolation,
-verification-code extraction, and the database layer. They need no network, no
-browser, and no API key.
+105 tests cover the diffing logic, catalog naming and chronological numbering,
+the occurrence-counted repair rename, adopting files already on disk,
+resume/gap tracking, the completeness audit and duplicate classification, case
+isolation, verification-code extraction, and the database layer.
+
+`tests/test_audit.py` runs the harvest pipeline end to end with only the
+Playwright calls stubbed, against a docket modelled on the awkward parts of the
+reference case: a title that repeats, a day-first date with a time on it, a date
+that cannot be read at all, a fourteen-attachment filing, a view-only entry, and
+a docket line with no document.
+
+They need no network, no browser, and no API key.
 
 ## License
 
