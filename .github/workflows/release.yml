@@ -1,16 +1,15 @@
 # Builds and publishes a release when a v* tag is pushed.
 #
-# Windows gets the full treatment: a frozen app, an Inno Setup installer, and a
-# portable zip -- the same artefacts tools/build_installer.py has always
-# produced locally, now built on a clean runner instead of a developer machine.
+# WINDOWS ONLY, deliberately. The app is Windows-only in source, not merely
+# unsigned there: the Playwright browser-path resolution, the browser-on-disk
+# check, the app window, the data directory and the error dialog all assume
+# Windows. A macOS tarball would therefore be an unsigned, iconless folder that
+# cannot find or install the browser it exists to drive, and it would fail
+# quietly while doing so -- worse than shipping nothing. macOS becomes its own
+# milestone once frozen_entry, bootstrap and desktop grow real platform
+# branches; until then this workflow does not pretend otherwise.
 #
-# macOS gets the frozen app as a tarball and nothing more. Inno Setup is
-# Windows-only, and this app has never been signed or notarised for macOS, so a
-# .dmg would be a download that Gatekeeper refuses to open. A tarball is honest
-# about what it is. The first tag to run this proves the macOS build; until then
-# treat that job as unverified.
-#
-# Both build inside a virtual environment because tools/build_installer.py
+# The build runs inside a virtual environment because tools/build_installer.py
 # refuses to freeze from a shared interpreter -- PyInstaller bundles whatever it
 # can import, and a runner's system Python is not a controlled input.
 
@@ -34,6 +33,12 @@ jobs:
       version: ${{ steps.check.outputs.version }}
     steps:
       - uses: actions/checkout@v4
+      # Pinned rather than relying on whatever `python` the runner image happens
+      # to provide. This job is the gate, and a gate that breaks when the image
+      # changes underneath it is not a gate.
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
       - id: check
         shell: bash
         run: |
@@ -46,18 +51,27 @@ jobs:
           fi
           echo "version=$tag" >> "$GITHUB_OUTPUT"
 
+  test:
+    # test.yml runs on every push, including a tag push, but nothing blocked on
+    # its result -- so a tag could publish over a red suite. This job is the one
+    # `publish` waits for.
+    name: tests
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r requirements.txt
+          python -m pip install pytest
+      - run: python -m pytest -q
+
   standalone:
-    name: ${{ matrix.label }}
+    name: windows-x64
     needs: verify-tag
-    runs-on: ${{ matrix.os }}
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - os: windows-latest
-            label: windows-x64
-          - os: macos-latest
-            label: macos-arm64
+    runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
 
@@ -65,77 +79,123 @@ jobs:
         with:
           python-version: "3.12"
 
-      - name: Inno Setup (Windows installer only)
-        if: runner.os == 'Windows'
+      - name: Inno Setup
         run: choco install innosetup -y --no-progress
 
       - name: Create the build environment
         shell: bash
         run: |
           python -m venv .venv
-          if [ "$RUNNER_OS" = "Windows" ]; then PY=.venv/Scripts/python; else PY=.venv/bin/python; fi
-          $PY -m pip install --upgrade pip
-          $PY -m pip install -r requirements.txt
-          $PY -m pip install pyinstaller
+          .venv/Scripts/python -m pip install --upgrade pip
+          .venv/Scripts/python -m pip install -r requirements.txt
+          .venv/Scripts/python -m pip install pyinstaller
 
-      - name: Build (Windows — app, installer, portable zip)
-        if: runner.os == 'Windows'
+      - name: Build the app, the installer and the portable zip
         run: .venv\Scripts\python tools/build_installer.py
 
-      - name: Build (macOS — frozen app only)
-        if: runner.os == 'macOS'
-        # Straight to PyInstaller: build_installer.py's later steps are the
-        # Inno Setup installer and a Windows-shaped zip.
-        run: |
-          .venv/bin/python -m PyInstaller tools/mdec.spec --noconfirm \
-            --distpath build_dist --workpath build_work
-
-      - name: Collect the artefacts
+      - name: Collect the artefacts, by name
         shell: bash
         env:
           VERSION: ${{ needs.verify-tag.outputs.version }}
-          LABEL: ${{ matrix.label }}
         run: |
           mkdir -p staging
-          if [ "$RUNNER_OS" = "Windows" ]; then
-            # build_installer.py already wrote Setup.exe and the portable zip.
-            cp dist/*.exe dist/*.zip staging/
-          else
-            test -d "build_dist/MDECDocketManager" \
-              || { echo "PyInstaller left nothing in build_dist/"; exit 1; }
-            tar -czf "staging/MDEC-Docket-Manager-${VERSION}-${LABEL}.tar.gz" \
-              -C build_dist MDECDocketManager
-          fi
+          setup="dist/MDEC-Docket-Manager-${VERSION}-Setup.exe"
+          portable="dist/MDEC-Docket-Manager-${VERSION}-portable.zip"
+          # build_installer.py PRINTS a warning and returns None when Inno Setup
+          # is missing rather than raising, so a runner where choco half-worked
+          # would otherwise produce a release with no installer in it.
+          test -f "$setup"    || { echo "::error::no installer at $setup"; exit 1; }
+          test -f "$portable" || { echo "::error::no portable zip at $portable"; exit 1; }
+          cp "$setup" "$portable" staging/
           ls -la staging
 
       - uses: actions/upload-artifact@v4
         with:
-          name: ${{ matrix.label }}
+          name: windows-x64
           path: staging/*
           if-no-files-found: error
 
   publish:
     name: publish the release
-    needs: [verify-tag, standalone]
+    needs: [verify-tag, test, standalone]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+
+      # NOT "assets": that is a tracked directory in this repo (mdec.ico,
+      # mdec-256.png, installer_after.txt), so downloading into it and globbing
+      # it published three repo files as release assets.
       - uses: actions/download-artifact@v4
         with:
-          path: assets
+          path: release-assets
           merge-multiple: true
+
+      - name: Hash the artefacts
+        shell: bash
+        env:
+          VERSION: ${{ needs.verify-tag.outputs.version }}
+        run: |
+          cd release-assets
+          if [ -z "$(ls -A)" ]; then
+            echo "::error::no artefacts were downloaded; refusing to publish an empty release"
+            exit 1
+          fi
+          test -f "MDEC-Docket-Manager-${VERSION}-Setup.exe" \
+            || { echo "::error::installer missing from the artefact set"; exit 1; }
+          test -f "MDEC-Docket-Manager-${VERSION}-portable.zip" \
+            || { echo "::error::portable zip missing from the artefact set"; exit 1; }
+          # One file over the assembled set. The format is fixed -- 64 hex, two
+          # spaces, the bare file name -- because that is what a verifier parses.
+          sha256sum * | sort -k2 > SHA256SUMS.txt
+          cat SHA256SUMS.txt
+
+      - name: Write the release notes
+        shell: bash
+        env:
+          VERSION: ${{ needs.verify-tag.outputs.version }}
+        run: |
+          printf '%s\n' \
+            '## Install' \
+            '' \
+            "Download **MDEC-Docket-Manager-${VERSION}-Setup.exe** and run it. It installs" \
+            'per-user, so there is no administrator prompt.' \
+            '' \
+            'SmartScreen will warn about an unrecognised publisher: the installer is **not' \
+            'code-signed**. That means the operating system cannot vouch for it, so the' \
+            'SHA-256 below is what to check rather than Windows'"'"' opinion of it.' \
+            '' \
+            '## Verify your download' \
+            '' \
+            '```powershell' \
+            "Get-FileHash .\\MDEC-Docket-Manager-${VERSION}-Setup.exe -Algorithm SHA256" \
+            '```' \
+            '' \
+            'Compare the result against `SHA256SUMS.txt`, attached below. On Linux or' \
+            'macOS, `sha256sum -c SHA256SUMS.txt` checks every file at once.' \
+            '' \
+            '```' > notes.md
+          cat release-assets/SHA256SUMS.txt >> notes.md
+          printf '%s\n' \
+            '```' \
+            '' \
+            '## Windows only' \
+            '' \
+            'This release is Windows-only. The app is Windows-specific in source, not' \
+            'merely unsigned elsewhere, so no macOS or Linux build is published rather' \
+            'than one that would fail quietly.' >> notes.md
+          cat notes.md
+
       - name: Publish
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           VERSION: ${{ needs.verify-tag.outputs.version }}
         run: |
-          ls -la assets
-          # Create on the first run for this tag; upload on a re-run, so a
-          # retry after one leg failed does not need the release deleting.
+          # Create on the first run for this tag; upload on a re-run, so a retry
+          # after one job failed does not need the release deleting first.
           if gh release view "v${VERSION}" >/dev/null 2>&1; then
-            gh release upload "v${VERSION}" assets/* --clobber
+            gh release upload "v${VERSION}" release-assets/* --clobber
           else
-            gh release create "v${VERSION}" assets/* \
+            gh release create "v${VERSION}" release-assets/* \
               --title "MDEC Docket Manager ${VERSION}" \
-              --generate-notes
+              --notes-file notes.md
           fi
